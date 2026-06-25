@@ -1,0 +1,154 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* ── Brand CSS variables — Light mode (default) ── */
+:root {
+  --color-bg-primary:     #F6F7FB;
+  --color-bg-surface:     #FFFFFF;
+  --color-brand:          #111E7B;
+  --color-brand-light:    #22C5FE;
+  --color-muted:          #6B7280;
+  --color-warning:        #F59E0B;
+  --color-danger:         #EF4444;
+  --color-success:        #10B981;
+  --color-text:           #111827;
+  --color-border:         #E5E7EB;
+  --color-border-mid:     #D1D5DB;
+  --color-text-faint:     #9CA3AF;
+  --color-text-mid:       #6B7280;
+
+  /* Sidebar */
+  --color-sidebar-bg:     #111E7B;
+  --color-sidebar-border: rgba(255,255,255,0.10);
+  --color-sidebar-text:   rgba(255,255,255,0.55);
+  --color-sidebar-active: rgba(255,255,255,0.12);
+}
+
+/* ── Dark mode ── */
+.dark {
+  --color-bg-primary:     #0D1117;
+  --color-bg-surface:     #161B22;
+  --color-brand:          #22C5FE;
+  --color-brand-light:    #60A5FA;
+  --color-muted:          #9CA3AF;
+  --color-text:           #F0F6FC;
+  --color-border:         #21262D;
+  --color-border-mid:     #30363D;
+  --color-text-faint:     #6E7681;
+  --color-text-mid:       #8B949E;
+
+  --color-sidebar-bg:     #0D1117;
+  --color-sidebar-border: rgba(255,255,255,0.07);
+  --color-sidebar-text:   rgba(255,255,255,0.45);
+  --color-sidebar-active: rgba(34,197,254,0.12);
+}
+
+/* ── Base resets ── */
+body {
+  margin: 0;
+  overflow: hidden;
+  font-family: 'Inter', 'SF Pro Display', -apple-system, sans-serif;
+  background: var(--color-bg-primary);
+  color: var(--color-text);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+#root {
+  width: 100%;
+  max-width: 100%;
+  margin: 0;
+  text-align: left;
+  height: 100svh;
+  display: flex;
+  flex-direction: column;
+  box-sizing: border-box;
+  overflow: hidden;
+}
+
+/* ── Tablas responsive ── */
+.moxi-table-wrap {
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+  border-radius: 8px;
+}
+table {
+  border-collapse: collapse;
+  width: 100%;
+  min-width: 480px;
+}
+
+/* ── Inputs touch-friendly ── */
+input, select, textarea {
+  min-height: 38px;
+  font-size: 14px !important;
+}
+@media (max-width: 768px) {
+  input, select, textarea {
+    min-height: 44px;
+    font-size: 16px !important;
+  }
+  button {
+    min-height: 40px;
+  }
+}
+
+/* ── Animaciones ── */
+@keyframes pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.45; }
+}
+@keyframes moxiLoad {
+  from { transform: translateX(-100%); }
+  to   { transform: translateX(250%); }
+}
+@keyframes slideInUp {
+  from { opacity: 0; transform: translateY(16px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+@keyframes fadeIn {
+  from { opacity: 0; }
+  to   { opacity: 1; }
+}
+
+/* ── Scrollbar minimalista ── */
+::-webkit-scrollbar { width: 5px; height: 5px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: rgba(0,0,0,0.15); border-radius: 10px; }
+::-webkit-scrollbar-thumb:hover { background: rgba(0,0,0,0.25); }
+.dark ::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.10); }
+
+/* ── KPI card accent bar animation ── */
+.kpi-accent-bar {
+  position: absolute;
+  bottom: 0; left: 0;
+  height: 3px; width: 100%;
+  opacity: 0.22;
+  border-radius: 0 0 16px 16px;
+}
+
+/* ── Sidebar transition ── */
+.sidebar-transition {
+  transition: width 0.22s cubic-bezier(.4,0,.2,1),
+              min-width 0.22s cubic-bezier(.4,0,.2,1),
+              transform 0.22s cubic-bezier(.4,0,.2,1);
+}
+
+/* ── Tooltip ── */
+.nav-tooltip {
+  position: absolute;
+  left: calc(100% + 10px);
+  top: 50%; transform: translateY(-50%);
+  background: var(--color-text);
+  color: var(--color-bg-surface);
+  padding: 4px 10px;
+  border-radius: 6px;
+  font-size: 12px;
+  white-space: nowrap;
+  pointer-events: none;
+  z-index: 999;
+  opacity: 0;
+  transition: opacity 0.15s;
+}
+.nav-item-wrap:hover .nav-tooltip { opacity: 1; }
