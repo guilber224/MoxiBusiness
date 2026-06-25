@@ -29,6 +29,15 @@ import {
 import { motion, AnimatePresence } from "framer-motion";
 import toast, { Toaster } from "react-hot-toast";
 import { CURRENCIES, getCurrencySymbol, applyCurrencyCode, resetCurrency, formatCurrency, Bs } from "./currency.js";
+import { getCurrentEmpresaId, setCurrentEmpresaId, isSupabaseScope, generateId } from "./empresaScope.js";
+import { xlsx } from "./utils/xlsxExport.js";
+import {
+  DEFAULT_CATEGORY_ID, CATEGORY_NAME_FALLBACKS, DEFAULT_CATEGORIES,
+  slugifyId, prettifyCategoryId, buildCategoryMap, getCategoryName, ensureCategories, sanitizeProducts,
+} from "./categories.js";
+import { Clientes } from "./components/Clientes.jsx";
+import { Productos } from "./components/Productos.jsx";
+import { Inventario } from "./components/Inventario.jsx";
 import { BRAND_NAME, BRAND_SUBTITLE, C, R, FONT, ThemeProvider, useTheme, safeBusinessName } from "./theme.jsx";
 import { card, lbl, inp, row, mkBtn, mkBadge } from "./styles.js";
 import { useIsMobile } from "./hooks/useIsMobile.js";
@@ -112,30 +121,17 @@ const PERIOD_OPTIONS = [
   ["5y", "5 Años"],
 ];
 const SALE_BASE_ITEM = () => ({ id: uid(), productId: "", qty: 1, unitPrice: 0, sub: 0, subtotal: 0 });
-// Empresa-scoped storage: empresa_id activo en este proceso.
-// Se actualiza en cuanto el usuario se autentica.
-let _currentEmpresaId = getLastEmpresaId();
-
-// Detecta si el scope activo es una cuenta Supabase (UUID) vs legacy local.
-const _isSupabaseScope = () =>
-  Boolean(_currentEmpresaId) &&
-  /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(_currentEmpresaId);
-
 // Claves de datos de negocio con backing en Supabase — NUNCA persistir en localStorage para cuentas Supabase.
 // Supabase es la única fuente de verdad para estas entidades.
 const SUPABASE_DATA_KEYS = new Set(["customers","products","inventory","sales","expenses","movements"]);
 
-// Genera id compatible con Supabase: UUID para cuentas Supabase, string corto para modo local.
-// IDs no-UUID son rechazados silenciosamente por Supabase (columna tipo uuid) → datos no persisten.
-const generateId = () => _isSupabaseScope() ? crypto.randomUUID() : uid();
-
 const loadStoredValue = async (key, fallback) => {
-  if (_currentEmpresaId) {
+  if (getCurrentEmpresaId()) {
     // Supabase UUID: business data proviene de Supabase, no localStorage.
     // Leer localStorage aquí causaría datos fantasma y contaminación cruzada.
-    if (_isSupabaseScope() && SUPABASE_DATA_KEYS.has(key)) return fallback;
+    if (isSupabaseScope() && SUPABASE_DATA_KEYS.has(key)) return fallback;
     // Supabase/multiempresa: SOLO clave scoped — nunca caer a global ni legacy.
-    const scoped = await DB.get(getScopedStorageKey(key, _currentEmpresaId), undefined);
+    const scoped = await DB.get(getScopedStorageKey(key, getCurrentEmpresaId()), undefined);
     return scoped !== undefined ? scoped : fallback;
   }
   // Modo local/legacy: global moxi_* → ah_* → fallback
@@ -149,12 +145,12 @@ const loadStoredValue = async (key, fallback) => {
   return fallback;
 };
 const persistValue = (key, value) => {
-  if (_currentEmpresaId) {
+  if (getCurrentEmpresaId()) {
     // Supabase UUID: business data se persiste en Supabase (vía syncDiff/services).
     // Escribir en localStorage generaría datos rancios y contaminación entre dispositivos.
-    if (_isSupabaseScope() && SUPABASE_DATA_KEYS.has(key)) return;
+    if (isSupabaseScope() && SUPABASE_DATA_KEYS.has(key)) return;
     // Supabase mode: SOLO clave scoped — nunca escribir en global.
-    DB.set(getScopedStorageKey(key, _currentEmpresaId), value);
+    DB.set(getScopedStorageKey(key, getCurrentEmpresaId()), value);
     return;
   }
   // Modo local: clave global moxi_*
@@ -316,65 +312,7 @@ const downloadSaleReceipt = async ({ sale, config, user }) => {
 // ╔══════════════════════════════════════════════════════════════════════╗
 // ║  SEED DATA                                                         ║
 // ╚══════════════════════════════════════════════════════════════════════╝
-const DEFAULT_CATEGORY_ID = "sin_categoria";
-const CATEGORY_NAME_FALLBACKS = {
-  vaina: "Ají en Vaina",
-  rojo_dulce: "Polvo Rojo Dulce",
-  rojo_picante: "Polvo Rojo Picante",
-  amarillo: "Polvo Amarillo",
-  granel: "Granel",
-};
-const DEFAULT_CATEGORIES = [
-  { id: DEFAULT_CATEGORY_ID, name: "Sin categoría", locked: true },
-  ...Object.entries(CATEGORY_NAME_FALLBACKS).map(([id, name]) => ({ id, name, locked: false })),
-];
 const DEFAULT_USERS = [];
-const slugifyId = value =>
-  String(value || "")
-    .toLowerCase()
-    .normalize("NFD")
-    .replace(/[\u0300-\u036f]/g, "")
-    .replace(/[^a-z0-9]+/g, "_")
-    .replace(/^_+|_+$/g, "");
-const prettifyCategoryId = value =>
-  String(value || DEFAULT_CATEGORY_ID)
-    .replace(/_/g, " ")
-    .replace(/\b\w/g, letter => letter.toUpperCase());
-const buildCategoryMap = categories =>
-  Object.fromEntries((categories || []).map(category => [category.id, category.name]));
-const getCategoryName = (categories, id) =>
-  buildCategoryMap(categories)[id] || CATEGORY_NAME_FALLBACKS[id] || prettifyCategoryId(id);
-const ensureCategories = (categories, products = []) => {
-  const base = Array.isArray(categories) && categories.length ? categories : DEFAULT_CATEGORIES;
-  const map = new Map();
-  base.forEach(category => {
-    if (!category?.id || !category?.name) return;
-    map.set(category.id, {
-      id: category.id,
-      name: category.name,
-      locked: category.id === DEFAULT_CATEGORY_ID ? true : !!category.locked,
-    });
-  });
-  if (!map.has(DEFAULT_CATEGORY_ID)) {
-    map.set(DEFAULT_CATEGORY_ID, { id: DEFAULT_CATEGORY_ID, name: "Sin categoría", locked: true });
-  }
-  products.forEach(product => {
-    if (!product?.cat || map.has(product.cat)) return;
-    map.set(product.cat, {
-      id: product.cat,
-      name: CATEGORY_NAME_FALLBACKS[product.cat] || prettifyCategoryId(product.cat),
-      locked: false,
-    });
-  });
-  return Array.from(map.values());
-};
-const sanitizeProducts = (products, categories) =>
-  (products || []).map(product => ({
-    ...product,
-    // Normaliza 'nombre' (columna legacy) → 'name' (campo que usa la app)
-    name: product.name || product.nombre || "",
-    cat: categories.some(category => category.id === product.cat) ? product.cat : DEFAULT_CATEGORY_ID,
-  }));
 const PRODUCTS0 = [
   { id:"p1",  name:"Ají en Vaina",            cat:"vaina",       unit:"kg",    price:15,  minStock:50, desc:"", img:null },
   { id:"p2",  name:"Polvo Rojo Dulce 50g",    cat:"rojo_dulce",  unit:"bolsa", price:8,   minStock:30, desc:"", img:null },
@@ -431,28 +369,6 @@ function buildChart(sales, period) {
   }
   return pts.map(({date,ventas,cobrado,deuda})=>({date,ventas:Math.round(ventas*100)/100,cobrado:Math.round(cobrado*100)/100,deuda:Math.round(deuda*100)/100}));
 }
-
-// ╔══════════════════════════════════════════════════════════════════════╗
-// ║  EXCEL EXPORT                                                       ║
-// ╚══════════════════════════════════════════════════════════════════════╝
-async function xlsx(sheets, filename) {
-  // xlsx (SheetJS) se carga solo cuando se exporta un reporte — evita inflar el bundle inicial.
-  const XLSX = await import("xlsx");
-  const wb=XLSX.utils.book_new();
-  sheets.forEach(({name,data})=>{ const ws=XLSX.utils.json_to_sheet(data); XLSX.utils.book_append_sheet(wb,ws,name); });
-  const mobileSave = window.MoxiAndroid?.saveBase64File || window.AjiAndroid?.saveBase64File;
-  if (mobileSave) {
-    const base64 = XLSX.write(wb, { bookType:"xlsx", type:"base64" });
-    mobileSave(
-      filename,
-      "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-      base64
-    );
-    return;
-  }
-  XLSX.writeFile(wb,filename);
-}
-
 
 const SECTORS_COLORS = [C.brandLight, C.green, C.warning, C.danger, "#7C3AED", "#0891B2"];
 
@@ -966,495 +882,6 @@ function DashboardPremium({ D, setTab, user, refreshTrigger = 0 }) {
             ))}
         </div>
       </div>
-    </div>
-  );
-}
-
-// ╔══════════════════════════════════════════════════════════════════════╗
-// ║  CLIENTES                                                           ║
-// ╚══════════════════════════════════════════════════════════════════════╝
-function Clientes({ D, save, user }) {
-  const { customers, sales } = D;
-  const [q,setQ]=useState(""); const [modal,setModal]=useState(null); const [detail,setDetail]=useState(null);
-  const [form,setForm]=useState({name:"",phone:"",address:"",market:"",ci:"",notes:""});
-  const [confirmDel,setConfirmDel]=useState(null);
-  const [err,setErr]=useState("");
-
-  const filtered=customers.filter(c=>`${c.name} ${c.market}`.toLowerCase().includes(q.toLowerCase()));
-  const openForm=(c=null)=>{ setErr(""); setForm(c?{...c}:{name:"",phone:"",address:"",market:"",ci:"",notes:""}); setModal(c||"new"); };
-  const doSave = async () => {
-    if (!form.name.trim()) return;
-    setErr("");
-    if (modal === "new") {
-      const cliente = { ...form, id: generateId(), createdAt: new Date().toISOString() };
-      const saved = await clientesService.createCliente(cliente, user?.empresa_id);
-      if (saved?._localOnly && isSupabaseUUID(user?.empresa_id)) {
-        setErr("⚠ Error al guardar en Supabase. Revisa la consola (F12).");
-        return;
-      }
-      save("customers", [...customers, cliente]);
-    } else {
-      const updated = { ...modal, ...form };
-      const saved = await clientesService.updateCliente(updated, user?.empresa_id).catch(e => { console.error("[Clientes] update:", e.message); return null; });
-      if (saved?._localOnly && isSupabaseUUID(user?.empresa_id)) {
-        setErr("⚠ Error al actualizar en Supabase. No se guardó — revisa tu conexión e intenta de nuevo.");
-        return;
-      }
-      save("customers", customers.map(c => c.id === modal.id ? { ...c, ...form } : c));
-    }
-    setModal(null);
-  };
-  const doDelete = async (id) => {
-    const res = await clientesService.deleteCliente(id, user?.empresa_id).catch(e => { console.error("[Clientes] delete:", e.message); return { ok: false, error: e.message }; });
-    if (res?.ok === false) {
-      toast.error("⚠ No se pudo eliminar en Supabase. Revisa tu conexión e intenta de nuevo.");
-      setConfirmDel(null);
-      return;
-    }
-    save("customers", customers.filter(c => c.id !== id));
-    setConfirmDel(null); setDetail(null);
-  };
-
-  const exportXLS=async()=>{
-    await xlsx([{name:"Clientes",data:customers.map(c=>{
-      const debt=sales.filter(s=>s.customerId===c.id).reduce((a,s)=>a+s.debt,0);
-      const total=sales.filter(s=>s.customerId===c.id).reduce((a,s)=>a+s.total,0);
-      return{Nombre:c.name,Teléfono:c.phone,Dirección:c.address,Mercado:c.market,"CI/NIT":c.ci,"Total Comprado(Bs)":total.toFixed(2),"Deuda(Bs)":debt.toFixed(2),Notas:c.notes};
-    })}],"clientes_moxi_business.xlsx");
-  };
-
-  if(detail){
-    const c=customers.find(x=>x.id===detail)||{};
-    const cSales=sales.filter(s=>s.customerId===c.id).sort((a,b)=>new Date(b.date)-new Date(a.date));
-    const debt=cSales.reduce((a,s)=>a+s.debt,0);
-    const total=cSales.reduce((a,s)=>a+s.total,0);
-    return (
-      <div>
-        <button onClick={()=>setDetail(null)} style={{...mkBtn("ghost"),marginBottom:16}}>← Volver</button>
-        <div style={{...card(),marginBottom:12}}>
-          <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:14,gap:12,flexWrap:"wrap"}}>
-            <div style={{display:"flex",gap:12,alignItems:"center"}}>
-              <div style={{width:50,height:50,background:`linear-gradient(135deg,${C.red},#7F1D1D)`,borderRadius:14,display:"flex",alignItems:"center",justifyContent:"center",fontSize:22,color:"white",fontWeight:700}}>{c.name?.[0]}</div>
-              <div><div style={{fontSize:19,fontWeight:700,letterSpacing:"-0.03em"}}>{c.name}</div><div style={{fontSize:13,color:C.textMid}}>{c.market}</div></div>
-            </div>
-            <div style={{display:"flex",gap:6}}>
-              <button onClick={()=>{openForm(c);setDetail(null);}} style={mkBtn("ghost")}>✏️ Editar</button>
-              <button onClick={()=>setConfirmDel(c.id)} style={mkBtn("danger")}>🗑️ Eliminar</button>
-            </div>
-          </div>
-          {confirmDel===c.id&&<div style={{background:C.redBg,border:`1px solid ${C.redMid}`,borderRadius:R.md,padding:"10px 14px",display:"flex",gap:10,alignItems:"center",marginBottom:12}}>
-            <span style={{fontSize:13,color:C.red,flex:1}}>¿Eliminar a <strong>{c.name}</strong>? Esta acción no se puede deshacer.</span>
-            <button onClick={()=>doDelete(c.id)} style={mkBtn("danger")}>Confirmar</button>
-            <button onClick={()=>setConfirmDel(null)} style={mkBtn("ghost")}>Cancelar</button>
-          </div>}
-          <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:12}}>
-            {[["Teléfono",c.phone||"—"],["CI / NIT",c.ci||"—"],["Dirección",c.address||"—"]].map(([k,v])=>(
-              <div key={k}><div style={lbl}>{k}</div><div style={{fontSize:13}}>{v}</div></div>
-            ))}
-          </div>
-          {c.notes&&<div style={{marginTop:10,fontSize:13,color:C.textMid,fontStyle:"italic"}}>{c.notes}</div>}
-        </div>
-        <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:10,marginBottom:12}}>
-          <KPI label="Compras" value={cSales.length} color={C.blue}/>
-          <KPI label="Total comprado" value={Bs(total)} color={C.red}/>
-          <KPI label="Deuda actual" value={Bs(debt)} color={debt>0?C.amber:C.green}/>
-        </div>
-        <div style={card()}>
-          <div style={{fontWeight:700,fontSize:13,marginBottom:12}}>Historial de compras</div>
-          {cSales.length===0?<Empty icon="🛒" title="Sin compras" sub="Este cliente no tiene compras registradas"/>:
-            <Table cols={[
-              {key:"date",label:"Fecha",render:v=>fDate(v)},
-              {key:"total",label:"Total",render:v=><strong style={{color:C.red}}>{Bs(v)}</strong>},
-              {key:"paid",label:"Pagado",render:v=><span style={{color:C.green}}>{Bs(v)}</span>},
-              {key:"debt",label:"Deuda",render:v=><span style={{color:v>0?C.amber:C.green}}>{Bs(v)}</span>},
-              {key:"debt",label:"Estado",render:v=><span style={mkBadge(v>0?"amber":"green")}>{v>0?"Pendiente":"Saldado"}</span>},
-            ]} rows={cSales}/>}
-        </div>
-      </div>
-    );
-  }
-
-  return (
-    <div>
-      <Header title="Clientes" sub={`${customers.length} clientes registrados`} action={<>
-        <button onClick={exportXLS} style={mkBtn("ghost")}>⬇️ Exportar Excel</button>
-        <button onClick={()=>openForm()} style={mkBtn("primary")}>+ Nuevo cliente</button>
-      </>}/>
-      <div style={{display:"flex",gap:8,marginBottom:14}}>
-        <SearchInput value={q} onChange={setQ} placeholder="Buscar por nombre o mercado..."/>
-      </div>
-      {filtered.length===0?<Empty icon="👥" title="Sin clientes" sub={q?"Sin resultados":"Agrega tu primer cliente"} action={!q&&<button onClick={()=>openForm()} style={mkBtn("primary")}>+ Agregar cliente</button>}/>:
-        filtered.map(c=>{
-          const debt=sales.filter(s=>s.customerId===c.id).reduce((a,s)=>a+s.debt,0);
-          const cnt=sales.filter(s=>s.customerId===c.id).length;
-          return (
-            <div key={c.id} onClick={()=>setDetail(c.id)} style={{...card(),cursor:"pointer",marginBottom:8,display:"flex",justifyContent:"space-between",alignItems:"center"}} onMouseEnter={e=>e.currentTarget.style.borderColor=C.borderMid} onMouseLeave={e=>e.currentTarget.style.borderColor=C.border}>
-              <div style={{display:"flex",gap:10,alignItems:"center"}}>
-                <div style={{width:40,height:40,background:`linear-gradient(135deg,${C.red},#7F1D1D)`,borderRadius:11,display:"flex",alignItems:"center",justifyContent:"center",fontSize:17,color:"white",fontWeight:700}}>{c.name[0]}</div>
-                <div><div style={{fontWeight:600,fontSize:14}}>{c.name}</div><div style={{fontSize:12,color:C.textMid}}>{c.market}{c.phone?` · ${c.phone}`:""}</div></div>
-              </div>
-              <div style={{textAlign:"right"}}>
-                <div style={{fontSize:12,color:C.textFaint,marginBottom:4}}>{cnt} compra{cnt!==1?"s":""}</div>
-                {debt>0?<span style={mkBadge("red")}>{Bs(debt)}</span>:cnt>0?<span style={mkBadge("green")}>Al día</span>:null}
-              </div>
-            </div>
-          );
-        })}
-      {modal&&<Modal title={modal==="new"?"Nuevo cliente":"Editar cliente"} onClose={()=>setModal(null)}>
-        <div style={row()}>
-          <div style={{flex:1}}><label style={lbl}>Nombre *</label><input style={inp} value={form.name} onChange={e=>setForm({...form,name:e.target.value})} placeholder="Nombre completo" autoFocus/></div>
-          <div style={{flex:1}}><label style={lbl}>CI / NIT</label><input style={inp} value={form.ci} onChange={e=>setForm({...form,ci:e.target.value})} placeholder="Número"/></div>
-        </div>
-        <div style={row()}>
-          <div style={{flex:1}}><label style={lbl}>Teléfono</label><input style={inp} value={form.phone} onChange={e=>setForm({...form,phone:e.target.value})} placeholder="70000000"/></div>
-          <div style={{flex:1}}><label style={lbl}>Mercado / Empresa</label><input style={inp} value={form.market} onChange={e=>setForm({...form,market:e.target.value})} placeholder="Mercado Los Pozos"/></div>
-        </div>
-        <div style={{marginBottom:10}}><label style={lbl}>Dirección</label><input style={inp} value={form.address} onChange={e=>setForm({...form,address:e.target.value})} placeholder="Dirección del cliente"/></div>
-        <div style={{marginBottom:18}}><label style={lbl}>Notas</label><input style={inp} value={form.notes} onChange={e=>setForm({...form,notes:e.target.value})} placeholder="Observaciones adicionales"/></div>
-        {err&&<div style={{color:"#F87171",fontSize:13,marginBottom:10}}>{err}</div>}
-        <div style={{display:"flex",gap:8,justifyContent:"flex-end"}}>
-          <button onClick={()=>setModal(null)} style={mkBtn("ghost")}>Cancelar</button>
-          <button onClick={doSave} style={mkBtn("primary")}>Guardar cliente</button>
-        </div>
-      </Modal>}
-      {/*
-        <div style={{fontSize:13,color:C.textMid,marginBottom:16}}>
-          Esta acción eliminará la venta seleccionada y restaurará el stock al inventario.
-        </div>
-        <div style={{display:"flex",gap:8,justifyContent:"flex-end"}}>
-          <button onClick={()=>setDeleteTarget(null)} style={mkBtn("ghost")}>Cancelar</button>
-          <button onClick={doDeleteSale} style={mkBtn("danger")}>Eliminar</button>
-        </div>
-      */}
-    </div>
-  );
-}
-
-// ╔══════════════════════════════════════════════════════════════════════╗
-// ║  PRODUCTOS                                                          ║
-// ╚══════════════════════════════════════════════════════════════════════╝
-function Productos({ D, save, user }) {
-  const { products, categories } = D;
-  const categoryOptions = categories.length ? categories : DEFAULT_CATEGORIES;
-  const firstCategoryId = categoryOptions.find(category => category.id !== DEFAULT_CATEGORY_ID)?.id || DEFAULT_CATEGORY_ID;
-  const emptyForm = { name: "", cat: firstCategoryId, unit: "bolsa", price: "", minStock: "", desc: "", img: null };
-  const [q,setQ]=useState("");
-  const [cat,setCat]=useState("all");
-  const [modal,setModal]=useState(null);
-  const [categoryName,setCategoryName]=useState("");
-  const [categoryErr,setCategoryErr]=useState("");
-  const [deleteCategoryTarget,setDeleteCategoryTarget]=useState(null);
-  const [form,setForm]=useState(emptyForm);
-  const [prodErr,setProdErr]=useState("");
-  const imgRef=useRef();
-  const cats=["all",...categoryOptions.map(category => category.id)];
-  const filtered=products.filter(p=>(cat==="all"||p.cat===cat)&&p.name.toLowerCase().includes(q.toLowerCase()));
-  const openForm=(product=null)=>{
-    setProdErr("");
-    setForm(product ? { ...product } : { ...emptyForm, cat: firstCategoryId });
-    setModal(product||"new");
-  };
-  // POS rapido: agrega tarjetas e imagenes sin alterar la logica base del carrito y la venta.
-  const doSave = async () => {
-    if (!form.name.trim()) return;
-    setProdErr("");
-    const nextProduct = { ...form, price:n(form.price), minStock:n(form.minStock), cat:form.cat||DEFAULT_CATEGORY_ID };
-    if (modal === "new") {
-      const producto = { ...nextProduct, id: generateId(), empresa_id: user?.empresa_id };
-      const saved = await productosService.upsertProducto(producto);
-      if (saved?._localOnly && isSupabaseUUID(user?.empresa_id)) {
-        setProdErr("⚠ Error al guardar en Supabase. Revisa la consola (F12).");
-        return;
-      }
-      save("products", [...products, { ...nextProduct, id: producto.id }]);
-    } else {
-      const producto = { ...products.find(p => p.id === modal.id), ...nextProduct, empresa_id: user?.empresa_id };
-      const saved = await productosService.upsertProducto(producto).catch(e => { console.error("[Productos] update:", e.message); return null; });
-      if (saved?._localOnly && isSupabaseUUID(user?.empresa_id)) {
-        setProdErr("⚠ Error al actualizar en Supabase. No se guardó — revisa tu conexión e intenta de nuevo.");
-        return;
-      }
-      save("products", products.map(p => p.id === modal.id ? { ...p, ...nextProduct } : p));
-    }
-    setModal(null);
-  };
-  const doDeleteProduct = async (id) => {
-    const res = await productosService.deleteProducto(id, user?.empresa_id).catch(e => { console.error("[Productos] delete:", e.message); return { ok: false, error: e.message }; });
-    if (res?.ok === false) {
-      toast.error("⚠ No se pudo eliminar en Supabase. Revisa tu conexión e intenta de nuevo.");
-      return;
-    }
-    save("products", products.filter(item => item.id !== id));
-  };
-  const handleImg=e=>{ const file=e.target.files[0]; if(!file)return; const reader=new FileReader(); reader.onload=event=>setForm(current=>({...current,img:event.target.result})); reader.readAsDataURL(file); };
-  const addCategory = () => {
-    const name = categoryName.trim();
-    if (!name) {
-      setCategoryErr("Escribe un nombre para la categoría");
-      return;
-    }
-    if (categoryOptions.some(category => category.name.toLowerCase() === name.toLowerCase())) {
-      setCategoryErr("Esa categoría ya existe");
-      return;
-    }
-    let id = slugifyId(name) || `categoria_${uid()}`;
-    while (categoryOptions.some(category => category.id === id)) {
-      id = `${id}_${uid().slice(0, 3)}`;
-    }
-    save("categories", [...categoryOptions, { id, name, locked: false }]);
-    setCategoryName("");
-    setCategoryErr("");
-  };
-  const deleteCategory = () => {
-    if (!deleteCategoryTarget) return;
-    const nextProducts = products.map(product => product.cat === deleteCategoryTarget.id ? { ...product, cat: DEFAULT_CATEGORY_ID } : product);
-    save("products", nextProducts);
-    save("categories", categoryOptions.filter(category => category.id !== deleteCategoryTarget.id));
-    if (cat === deleteCategoryTarget.id) setCat("all");
-    if (form.cat === deleteCategoryTarget.id) setForm(current => ({ ...current, cat: DEFAULT_CATEGORY_ID }));
-    setDeleteCategoryTarget(null);
-  };
-
-  return (
-    <div>
-      <Header title="Productos" sub={`Catálogo profesional de ${BRAND_NAME}`} action={<button onClick={()=>openForm()} style={mkBtn("primary")}>+ Nuevo producto</button>}/>
-      <div style={{display:"flex",gap:8,marginBottom:14,flexWrap:"wrap"}}>
-        <SearchInput value={q} onChange={setQ} placeholder="Buscar producto..."/>
-        <div style={{display:"flex",gap:3,flexWrap:"wrap"}}>
-          {cats.map(categoryId => (
-            <button key={categoryId} onClick={()=>setCat(categoryId)} style={{...mkBtn(cat===categoryId?"primary":"subtle"),fontSize:12,padding:"6px 11px"}}>
-              {categoryId==="all" ? "Todos" : getCategoryName(categoryOptions, categoryId)}
-            </button>
-          ))}
-        </div>
-      </div>
-
-      <div style={{...card(),marginBottom:14}}>
-        <div style={{fontWeight:700,fontSize:13,marginBottom:10}}>Categorías editables</div>
-        <div style={{display:"flex",gap:8,flexWrap:"wrap",marginBottom:10}}>
-          <input style={{...inp,flex:"1 1 240px"}} value={categoryName} onChange={e=>setCategoryName(e.target.value)} placeholder="Nueva categoría" />
-          <button onClick={addCategory} style={mkBtn("primary")}>+ Agregar categoría</button>
-        </div>
-        {categoryErr && <div style={{fontSize:12,color:C.red,marginBottom:10}}>{categoryErr}</div>}
-        <div style={{display:"flex",gap:8,flexWrap:"wrap"}}>
-          {categoryOptions.map(category => (
-            <div key={category.id} style={{display:"flex",alignItems:"center",gap:6,padding:"6px 10px",borderRadius:20,background:C.bg,border:`1px solid ${C.border}`}}>
-              <span style={{fontSize:12,fontWeight:600}}>{category.name}</span>
-              {!category.locked && (
-                <button onClick={()=>setDeleteCategoryTarget(category)} style={{background:"none",border:"none",cursor:"pointer",color:C.red,padding:0,fontSize:14,lineHeight:1}}>×</button>
-              )}
-            </div>
-          ))}
-        </div>
-        <div style={{fontSize:12,color:C.textFaint,marginTop:10}}>
-          Si eliminas una categoría, sus productos pasarán automáticamente a "Sin categoría".
-        </div>
-      </div>
-
-      {filtered.length===0?<Empty icon="📦" title="Sin productos" sub="No hay productos con estos filtros"/>:
-        <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(190px,1fr))",gap:10}}>
-          {filtered.map(product=>(
-            <div key={product.id} style={{...card({padding:0,overflow:"hidden"})}}>
-              <div style={{height:100,background:product.img?"none":`linear-gradient(135deg,${C.redBg},${C.amberBg})`,display:"flex",alignItems:"center",justifyContent:"center",overflow:"hidden",borderBottom:`1px solid ${C.border}`}}>
-                {product.img?<img src={product.img} alt={product.name} style={{width:"100%",height:"100%",objectFit:"cover"}}/>:<span style={{fontSize:38}}>🌶️</span>}
-              </div>
-              <div style={{padding:"10px 12px"}}>
-                <div style={{fontSize:11,color:C.textFaint,marginBottom:2}}>{getCategoryName(categoryOptions, product.cat)}</div>
-                <div style={{fontWeight:700,fontSize:13,marginBottom:6,lineHeight:1.3}}>{product.name}</div>
-                <div style={{fontSize:16,fontWeight:800,color:C.red,letterSpacing:"-0.03em"}}>{Bs(product.price)}<span style={{fontSize:10,fontWeight:400,color:C.textFaint}}>/{product.unit}</span></div>
-                {product.minStock>0&&<div style={{fontSize:11,color:C.textFaint,marginTop:2}}>Mín: {product.minStock} {product.unit}</div>}
-                <div style={{display:"flex",gap:4,marginTop:8}}>
-                  <button onClick={()=>openForm(product)} style={{...mkBtn("ghost"),padding:"4px 8px",flex:1,justifyContent:"center",fontSize:11}}>✏️</button>
-                  <button onClick={()=>doDeleteProduct(product.id)} style={{...mkBtn("danger"),padding:"4px 8px",flex:1,justifyContent:"center",fontSize:11}}>🗑️</button>
-                </div>
-              </div>
-            </div>
-          ))}
-        </div>}
-      {modal&&<Modal title={modal==="new"?"Nuevo producto":"Editar producto"} onClose={()=>setModal(null)}>
-        <div style={row()}>
-          <div style={{flex:2}}><label style={lbl}>Nombre *</label><input style={inp} value={form.name} onChange={e=>setForm({...form,name:e.target.value})} placeholder="Nombre del producto" autoFocus/></div>
-          <div style={{flex:1}}><label style={lbl}>Categoría</label>
-            <select style={inp} value={form.cat} onChange={e=>setForm({...form,cat:e.target.value})}>
-              {categoryOptions.map(category=><option key={category.id} value={category.id}>{category.name}</option>)}
-            </select>
-          </div>
-        </div>
-        <div style={row()}>
-          <div style={{flex:1}}><label style={lbl}>Precio (Bs.)</label><input type="number" style={inp} value={form.price} onChange={e=>setForm({...form,price:e.target.value})} placeholder="0.00"/></div>
-          <div style={{flex:1}}><label style={lbl}>Unidad</label><input style={inp} value={form.unit} onChange={e=>setForm({...form,unit:e.target.value})} placeholder="bolsa, kg..."/></div>
-          <div style={{flex:1}}><label style={lbl}>Stock mínimo</label><input type="number" style={inp} value={form.minStock} onChange={e=>setForm({...form,minStock:e.target.value})} placeholder="0"/></div>
-        </div>
-        <div style={{marginBottom:10}}><label style={lbl}>Descripción</label><input style={inp} value={form.desc} onChange={e=>setForm({...form,desc:e.target.value})} placeholder="Descripción opcional"/></div>
-        <div style={{marginBottom:18}}>
-          <label style={lbl}>Imagen del producto</label>
-          <div style={{display:"flex",gap:10,alignItems:"center"}}>
-            {form.img&&<img src={form.img} alt="" style={{width:56,height:56,objectFit:"cover",borderRadius:8,border:`1px solid ${C.border}`}}/>}
-            <button onClick={()=>imgRef.current?.click()} style={mkBtn("ghost")}>📁 {form.img?"Cambiar imagen":"Subir imagen"}</button>
-            <input ref={imgRef} type="file" accept="image/*" style={{display:"none"}} onChange={handleImg}/>
-            {form.img&&<button onClick={()=>setForm({...form,img:null})} style={{...mkBtn("danger"),padding:"7px 10px"}}>✕</button>}
-          </div>
-        </div>
-        <div style={{display:"flex",gap:8,justifyContent:"flex-end"}}>
-          <button onClick={()=>setModal(null)} style={mkBtn("ghost")}>Cancelar</button>
-          {prodErr&&<div style={{color:"#F87171",fontSize:13,marginBottom:10}}>{prodErr}</div>}
-          <button onClick={doSave} style={mkBtn("primary")}>Guardar producto</button>
-        </div>
-      </Modal>}
-      {deleteCategoryTarget&&<Modal title="Eliminar categoría" onClose={()=>setDeleteCategoryTarget(null)} width={420}>
-        <div style={{fontSize:13,color:C.textMid,marginBottom:16}}>
-          La categoría <strong style={{color:C.text}}>{deleteCategoryTarget.name}</strong> se eliminará y sus productos pasarán a "Sin categoría".
-        </div>
-        <div style={{display:"flex",gap:8,justifyContent:"flex-end"}}>
-          <button onClick={()=>setDeleteCategoryTarget(null)} style={mkBtn("ghost")}>Cancelar</button>
-          <button onClick={deleteCategory} style={mkBtn("danger")}>Eliminar categoría</button>
-        </div>
-      </Modal>}
-    </div>
-  );
-}
-
-// ╔══════════════════════════════════════════════════════════════════════╗
-// ║  INVENTARIO                                                         ║
-// ╚══════════════════════════════════════════════════════════════════════╝
-function Inventario({ D, save, user }) {
-  const { products, inventory, movements, categories } = D;
-  const [modal,setModal]=useState(false); const [filter,setFilter]=useState("all"); const [q,setQ]=useState("");
-  const [form,setForm]=useState({productId:"",type:"entrada",qty:"",cost:"",notes:"",date:today()});
-  const categoryOptions = categories.length ? categories : DEFAULT_CATEGORIES;
-  const getStock=id=>(inventory.find(i=>i.productId===id)||{}).stock||0;
-  const level=(stock,min)=>{ if(min<=0)return"ok"; if(stock===0)return"empty"; if(stock<=min)return"low"; return"ok"; };
-  const allRows=products.map(p=>({...p,stock:getStock(p.id),level:level(getStock(p.id),p.minStock)}));
-  const rows=allRows.filter(p=>(filter==="all"||p.level===filter)&&(!q||p.name.toLowerCase().includes(q.toLowerCase())));
-  const totalVal=products.reduce((a,p)=>a+getStock(p.id)*p.price,0);
-  const lowC=allRows.filter(p=>p.level==="low").length;
-  const emptyC=allRows.filter(p=>p.level==="empty").length;
-  const alertProds=allRows.filter(p=>p.level!=="ok");
-
-  const doMove=async()=>{
-    if(!form.productId||!form.qty)return;
-    const qty=n(form.qty);
-    let newInv=[...inventory];
-    const idx=newInv.findIndex(i=>i.productId===form.productId);
-    if(form.type==="ajuste"){
-      if(idx>=0)newInv[idx]={...newInv[idx],stock:qty};
-      else newInv.push({id:generateId(),productId:form.productId,stock:qty});
-    } else if(form.type==="entrada"){
-      if(idx>=0)newInv[idx]={...newInv[idx],stock:newInv[idx].stock+qty};
-      else newInv.push({id:generateId(),productId:form.productId,stock:qty});
-    } else {
-      if(idx>=0)newInv[idx]={...newInv[idx],stock:Math.max(0,newInv[idx].stock-qty)};
-    }
-    // Sync each changed inventory item to Supabase directly, esperando confirmación antes de aplicar localmente
-    const changedItems = newInv.filter(item => {
-      const prev = inventory.find(i => i.productId === item.productId);
-      return !prev || prev.stock !== item.stock;
-    });
-    const upsertResults = await Promise.all(
-      changedItems.map(item => inventarioService.upsertStock(item, user?.empresa_id).catch(e => { console.error("[Inventario] upsertStock:", e.message); return { _localOnly: true }; }))
-    );
-    if (upsertResults.some(r => r?._localOnly) && isSupabaseUUID(user?.empresa_id)) {
-      toast.error("⚠ Error Supabase al ajustar el stock. No se guardó — revisa tu conexión e intenta de nuevo.");
-      return;
-    }
-    const movimiento = {id:generateId(),...form,qty,cost:n(form.cost)||0,createdAt:new Date().toISOString(),usuario_id:user?.id};
-    const movRes = await movimientosService.createMovimiento(movimiento, user?.empresa_id).catch(e => { console.error("[Inventario] createMovimiento:", e.message); return { _localOnly: true }; });
-    if (movRes?._localOnly && isSupabaseUUID(user?.empresa_id)) {
-      toast.error("⚠ El stock se guardó, pero no se pudo registrar el movimiento en Supabase. Revisa tu conexión.");
-    }
-    save("inventory",newInv);
-    save("movements",[movimiento,...movements]);
-    setModal(false); setForm({productId:"",type:"entrada",qty:"",cost:"",notes:"",date:today()});
-  };
-
-  const levelBadge={ok:"green",low:"amber",empty:"red"};
-  const levelLabel={ok:"Disponible",low:"Stock bajo",empty:"Agotado"};
-  const mvColor={entrada:C.green,salida:C.red,ajuste:C.blue};
-  const mvLabel={entrada:"↑ Entrada",salida:"↓ Salida",ajuste:"✏ Ajuste"};
-
-  return (
-    <div>
-      <Header title="Inventario" sub="Control de stock en tiempo real" action={<button onClick={()=>setModal(true)} style={mkBtn("primary")}>↕ Registrar movimiento</button>}/>
-
-      {/* Alertas de stock */}
-      {alertProds.length>0&&(
-        <div style={{...card({marginBottom:14,borderLeft:`3px solid ${emptyC>0?C.red:C.amber}`}),background:emptyC>0?C.redBg:C.amberBg}}>
-          <div style={{fontWeight:600,fontSize:13,marginBottom:6,color:emptyC>0?C.red:C.amber}}>
-            {emptyC>0?`⚠ ${emptyC} producto${emptyC!==1?"s":""} agotado${emptyC!==1?"s":""}`:`⚠ ${lowC} producto${lowC!==1?"s":""} con stock bajo`}
-          </div>
-          <div style={{display:"flex",gap:6,flexWrap:"wrap"}}>
-            {alertProds.map(p=>(
-              <span key={p.id} style={{padding:"2px 8px",borderRadius:4,background:"rgba(0,0,0,0.07)",fontSize:11,color:p.level==="empty"?C.red:C.amber,fontWeight:500}}>
-                {p.name}: {getStock(p.id)} {p.unit}
-              </span>
-            ))}
-          </div>
-        </div>
-      )}
-
-      <div style={{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:10,marginBottom:14}}>
-        <KPI label="Valor total en stock" value={Bs(totalVal)} Icon="🗃️" color={C.blue}/>
-        <KPI label="Stock bajo" value={lowC} Icon="⚠️" color={C.amber}/>
-        <KPI label="Agotados" value={emptyC} Icon="🚫" color={C.red}/>
-      </div>
-      <div style={{display:"flex",gap:8,marginBottom:12,flexWrap:"wrap"}}>
-        <SearchInput value={q} onChange={setQ} placeholder="Buscar producto..."/>
-        <Chip value={filter} onChange={setFilter} options={[["all","Todos"],["ok","Disponible"],["low","Stock bajo"],["empty","Agotados"]]}/>
-      </div>
-      <div style={card()}>
-        <Table cols={[
-          {key:"name",label:"Producto",style:{fontWeight:500}},
-          {key:"cat",label:"Categoría",render:value=>getCategoryName(categoryOptions,value)},
-          {key:"stock",label:"Stock",render:(v,row)=><strong style={{color:v===0?C.red:v<=row.minStock&&row.minStock>0?C.amber:C.green}}>{v} <span style={{fontWeight:400,fontSize:11,color:C.textFaint}}>{row.unit}</span></strong>},
-          {key:"price",label:"Precio unit.",render:value=>Bs(value)},
-          {key:"stock",label:"Valor",render:(v,row)=><span style={{fontWeight:700,color:C.blue}}>{Bs(v*row.price)}</span>},
-          {key:"minStock",label:"Mínimo",render:(v,row)=>`${v} ${row.unit}`},
-          {key:"level",label:"Estado",render:v=><span style={mkBadge(levelBadge[v])}>{levelLabel[v]}</span>},
-        ]} rows={rows}/>
-      </div>
-      {movements.length>0&&<div style={{...card(),marginTop:14}}>
-        <div style={{fontWeight:700,fontSize:13,marginBottom:10}}>Kardex — Últimos 30 movimientos</div>
-        <Table cols={[
-          {key:"date",label:"Fecha",render:v=>fDate(v)},
-          {key:"type",label:"Tipo",render:v=><span style={{...mkBadge("default"),color:mvColor[v]||C.text,background:mvColor[v]+"18"}}>{mvLabel[v]||v}</span>},
-          {key:"productId",label:"Producto",render:v=>products.find(p=>p.id===v)?.name||"—"},
-          {key:"qty",label:"Cantidad",render:(v,row)=>{ const p=products.find(x=>x.id===row.productId); const sign=row.type==="salida"?"-":row.type==="ajuste"?"=":"+"; return <span style={{fontWeight:600,color:mvColor[row.type]||C.text}}>{sign}{v} {p?.unit}</span>; }},
-          {key:"cost",label:"Costo unit.",render:v=>v>0?Bs(v):"—"},
-          {key:"notes",label:"Notas",render:v=>v||"—"},
-        ]} rows={movements.slice(0,30)}/>
-      </div>}
-
-      {modal&&<Modal title="Registrar movimiento de inventario" onClose={()=>setModal(false)}>
-        <div style={{marginBottom:12}}>
-          <label style={lbl}>Tipo de movimiento</label>
-          <div style={{display:"flex",gap:6}}>
-            {[["entrada","↑ Entrada","success"],["salida","↓ Salida","danger"],["ajuste","✏ Ajuste","ghost"]].map(([v,l,c])=>(
-              <button key={v} onClick={()=>setForm({...form,type:v})} style={{...mkBtn(form.type===v?(v==="entrada"?"success":v==="salida"?"danger":"primary"):"ghost"),flex:1,justifyContent:"center",fontSize:12}}>{l}</button>
-            ))}
-          </div>
-          {form.type==="ajuste"&&<div style={{fontSize:11,color:C.textFaint,marginTop:5}}>Ajuste: establece el stock exacto (corrección tras conteo físico).</div>}
-        </div>
-        <div style={{marginBottom:10}}><label style={lbl}>Producto *</label>
-          <select style={inp} value={form.productId} onChange={e=>setForm({...form,productId:e.target.value})}>
-            <option value="">Seleccionar producto...</option>
-            {categoryOptions.map(cat=>(
-              <optgroup key={cat.id} label={cat.name}>{products.filter(p=>p.cat===cat.id).map(p=><option key={p.id} value={p.id}>{p.name} — Stock: {getStock(p.id)} {p.unit}</option>)}</optgroup>
-            ))}
-          </select>
-        </div>
-        <div style={row()}>
-          <div style={{flex:1}}><label style={lbl}>{form.type==="ajuste"?"Stock final *":"Cantidad *"}</label><input type="number" min="0" step="0.1" style={inp} value={form.qty} onChange={e=>setForm({...form,qty:e.target.value})} placeholder="0" autoFocus/></div>
-          <div style={{flex:1}}><label style={lbl}>Costo unit. (Bs.)</label><input type="number" min="0" step="0.5" style={inp} value={form.cost} onChange={e=>setForm({...form,cost:e.target.value})} placeholder="0.00"/></div>
-        </div>
-        <div style={row()}>
-          <div style={{flex:1}}><label style={lbl}>Fecha</label><input type="date" style={inp} value={form.date} onChange={e=>setForm({...form,date:e.target.value})}/></div>
-          <div style={{flex:2}}><label style={lbl}>Notas</label><input style={inp} value={form.notes} onChange={e=>setForm({...form,notes:e.target.value})} placeholder="Razón del movimiento..."/></div>
-        </div>
-        <div style={{display:"flex",gap:8,justifyContent:"flex-end",marginTop:4}}>
-          <button onClick={()=>setModal(false)} style={mkBtn("ghost")}>Cancelar</button>
-          <button onClick={doMove} style={mkBtn("primary")}>Registrar movimiento</button>
-        </div>
-      </Modal>}
     </div>
   );
 }
@@ -4012,7 +3439,7 @@ export default function App() {
   const loginUser = useCallback((newUser) => {
     userRef.current = newUser;
     if (newUser?.empresa_id) {
-      _currentEmpresaId = newUser.empresa_id;
+      setCurrentEmpresaId(newUser.empresa_id);
       saveLastEmpresaId(newUser.empresa_id);
       setIsLoadingScope(true);
     }
@@ -4022,7 +3449,7 @@ export default function App() {
   // Actualizar empresa scope cuando el usuario se autentica
   useEffect(() => {
     if (user?.empresa_id) {
-      _currentEmpresaId = user.empresa_id;
+      setCurrentEmpresaId(user.empresa_id);
       saveLastEmpresaId(user.empresa_id);
       migrateLegacyStorageIfNeeded(user.empresa_id);
     }
@@ -4031,7 +3458,7 @@ export default function App() {
   const handleLogout = async () => {
     // Hard reset: limpiar TODO síncronamente antes de signOut.
     // Orden crítico: refs primero (para SIGNED_OUT handler), luego React state.
-    _currentEmpresaId = null;
+    setCurrentEmpresaId(null);
     userRef.current   = null;
     dataRef.current   = null;
     setUser(null);
@@ -4060,7 +3487,7 @@ export default function App() {
         name: profile.nombre || user.name,
         role: profile.role?.toLowerCase() || user.role,
       };
-      _currentEmpresaId = updated.empresa_id;
+      setCurrentEmpresaId(updated.empresa_id);
       saveLastEmpresaId(updated.empresa_id);
       userRef.current = updated;
       setUser(updated);
@@ -4081,9 +3508,9 @@ const init = async () => {
     (async()=>{
       // Migrar datos globales → scope ANTES de leerlos (orden crítico).
       // Sin esto, la primera carga tras login Supabase veía claves vacías.
-      if (_currentEmpresaId) migrateLegacyStorageIfNeeded(_currentEmpresaId);
+      if (getCurrentEmpresaId()) migrateLegacyStorageIfNeeded(getCurrentEmpresaId());
 
-      const hasScope = Boolean(_currentEmpresaId);
+      const hasScope = Boolean(getCurrentEmpresaId());
       // Categorías vacías para cuentas Supabase — el usuario define las suyas propias.
       const catFallback = hasScope
         ? [{ id: DEFAULT_CATEGORY_ID, name: "Sin categoría", locked: true }]
@@ -4171,7 +3598,7 @@ const init = async () => {
             // Actualizar scope síncronamente para que persistValue use el empresa_id correcto
             // desde el primer tick. isLoadingScope bloquea el ERP antes del render.
             if (newUser.empresa_id) {
-              _currentEmpresaId = newUser.empresa_id;
+              setCurrentEmpresaId(newUser.empresa_id);
               saveLastEmpresaId(newUser.empresa_id);
               setIsLoadingScope(true);
             }
@@ -4195,7 +3622,7 @@ const init = async () => {
         // Si un nuevo usuario ya se logueó (loginUser actualizó userRef síncronamente)
         // no limpiar — evita race condition logout-rápido → nuevo-login.
         if (userRef.current) return;
-        _currentEmpresaId = null;
+        setCurrentEmpresaId(null);
         resetCurrency();
         dataRef.current   = null;
         setUser(null);
