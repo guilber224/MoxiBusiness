@@ -2,6 +2,7 @@ import { createContext, useContext, useState, useEffect, useCallback } from "rea
 
 export const BRAND_NAME = "Moxi Business";
 export const BRAND_SUBTITLE = "ERP + POS Empresarial";
+export const safeBusinessName = config => config?.businessName?.trim() || BRAND_NAME;
 
 // ╔══════════════════════════════════════════════════════════════════════╗
 // ║  DESIGN SYSTEM — TOKENS                                            ║
