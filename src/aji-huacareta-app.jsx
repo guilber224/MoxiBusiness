@@ -28,6 +28,7 @@ import {
 } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
 import toast, { Toaster } from "react-hot-toast";
+import { CURRENCIES, getCurrencySymbol, applyCurrencyCode, resetCurrency, formatCurrency, Bs } from "./currency.js";
 import { BRAND_NAME, BRAND_SUBTITLE, C, R, FONT, ThemeProvider, useTheme, safeBusinessName } from "./theme.jsx";
 import { card, lbl, inp, row, mkBtn, mkBadge } from "./styles.js";
 import { useIsMobile } from "./hooks/useIsMobile.js";
@@ -47,6 +48,9 @@ import { AuthScreen } from "./screens/AuthScreen.jsx";
 import { ResetPasswordScreen } from "./screens/ResetPasswordScreen.jsx";
 import { OnboardingIncompleteScreen } from "./screens/OnboardingIncompleteScreen.jsx";
 import { Sidebar } from "./components/Sidebar.jsx";
+import { LogoUploader } from "./components/LogoUploader.jsx";
+import { QrUploader } from "./components/QrUploader.jsx";
+import { UsuariosAdmin } from "./components/UsuariosAdmin.jsx";
 // ╔══════════════════════════════════════════════════════════════════════╗
 // ║  STORAGE                                                           ║
 // ╚══════════════════════════════════════════════════════════════════════╝
@@ -63,22 +67,6 @@ const DB = {
   async get(k, fb) { try { const r = await storageApi.get(k); return r ? JSON.parse(r.value) : fb; } catch { return fb; } },
   async set(k, v) { try { await storageApi.set(k, JSON.stringify(v)); } catch {} },
 };
-const CURRENCIES = [
-  { code:"BOB", symbol:"Bs.",  name:"Boliviano",        locale:"es-BO" },
-  { code:"USD", symbol:"$",    name:"Dólar Americano",  locale:"en-US" },
-  { code:"CLP", symbol:"CLP$", name:"Peso Chileno",     locale:"es-CL" },
-  { code:"ARS", symbol:"ARS$", name:"Peso Argentino",   locale:"es-AR" },
-  { code:"BRL", symbol:"R$",   name:"Real Brasileño",   locale:"pt-BR" },
-  { code:"EUR", symbol:"€",    name:"Euro",             locale:"es-ES" },
-  { code:"CNY", symbol:"¥",    name:"Yuan Chino",       locale:"zh-CN" },
-  { code:"PEN", symbol:"S/",   name:"Sol Peruano",      locale:"es-PE" },
-  { code:"MXN", symbol:"MX$",  name:"Peso Mexicano",    locale:"es-MX" },
-  { code:"PYG", symbol:"₲",    name:"Guaraní",          locale:"es-PY" },
-];
-let _currencySymbol = "Bs.";
-let _currencyLocale = "es-BO";
-const formatCurrency = v => `${_currencySymbol} ${n(v).toLocaleString(_currencyLocale,{minimumFractionDigits:2,maximumFractionDigits:2})}`;
-const Bs = formatCurrency;
 
 // Persistencia Moxi: migra a nuevas claves sin perder datos históricos guardados localmente.
 const STORAGE_KEYS = {
@@ -469,435 +457,6 @@ async function xlsx(sheets, filename) {
 const SECTORS_COLORS = [C.brandLight, C.green, C.warning, C.danger, "#7C3AED", "#0891B2"];
 
 
-// ── Logo uploader (Supabase Storage) ─────────────────────────────────────
-function LogoUploader({ config, save, user }) {
-  const [uploading, setUploading] = useState(false);
-  const [preview, setPreview] = useState(config?.logo_url || null);
-  const fileRef = useRef(null);
-
-  useEffect(() => { setPreview(config?.logo_url || null); }, [config?.logo_url]);
-
-  const handleFile = (file) => {
-    if (!file) return;
-    if (!file.type.startsWith("image/")) { toast.error("Solo se permiten imágenes"); return; }
-    if (file.size > 2 * 1024 * 1024) { toast.error("La imagen no puede superar 2 MB"); return; }
-    const reader = new FileReader();
-    reader.onload = async (ev) => {
-      const dataUrl = ev.target.result;
-      setPreview(dataUrl);
-      setUploading(true);
-      try {
-        const ext = file.name.split(".").pop() || "png";
-        const path = `${user?.empresa_id || "local"}/logo.${ext}`;
-        const { error: upErr } = await supabase.storage.from("empresa-assets").upload(path, file, { upsert: true });
-        if (upErr) {
-          save("config", { ...config, logo_url: dataUrl });
-          toast.success("Logo guardado localmente");
-          return;
-        }
-        const { data: urlData } = supabase.storage.from("empresa-assets").getPublicUrl(path);
-        save("config", { ...config, logo_url: urlData.publicUrl });
-        toast.success("Logo actualizado en servidor");
-      } catch {
-        save("config", { ...config, logo_url: dataUrl });
-        toast.success("Logo guardado localmente");
-      } finally { setUploading(false); }
-    };
-    reader.readAsDataURL(file);
-  };
-
-  const handleDrop = e => { e.preventDefault(); const f = e.dataTransfer.files[0]; if (f) handleFile(f); };
-
-  return (
-    <div style={{ ...card(), marginBottom: 14 }}>
-      <div style={{ fontWeight: 700, fontSize: 13, marginBottom: 12 }}>Logo del negocio</div>
-      <div style={{ display:"flex",gap:16,alignItems:"center",flexWrap:"wrap" }}>
-        <div
-          onClick={() => !uploading && fileRef.current?.click()}
-          onDrop={handleDrop} onDragOver={e => e.preventDefault()}
-          style={{ width:96,height:96,border:`2px dashed var(--color-border)`,borderRadius:14,display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",cursor:uploading?"not-allowed":"pointer",overflow:"hidden",background:"var(--color-bg-primary)",flexShrink:0,transition:"border-color 0.15s" }}
-          onMouseEnter={e=>{ if(!uploading) e.currentTarget.style.borderColor=C.brand; }}
-          onMouseLeave={e=>e.currentTarget.style.borderColor="var(--color-border)"}
-        >
-          {preview
-            ? <img src={preview} alt="logo" style={{ width:"100%",height:"100%",objectFit:"contain" }} />
-            : <><ImageIcon size={24} color="var(--color-text-faint)" /><div style={{ fontSize:9,color:"var(--color-text-faint)",marginTop:6,textAlign:"center",padding:"0 6px" }}>{uploading?"Subiendo…":"Click / arrastra"}</div></>
-          }
-        </div>
-        <div style={{ flex:1,minWidth:160 }}>
-          <div style={{ fontSize:12,color:"var(--color-text-mid)",marginBottom:10 }}>
-            Aparece en el login y comprobantes PDF.<br/>Formatos: JPG, PNG, SVG · Máx. 2 MB.
-          </div>
-          <input ref={fileRef} type="file" accept="image/*" style={{ display:"none" }} onChange={e=>handleFile(e.target.files[0])} />
-          <div style={{ display:"flex",gap:8 }}>
-            <button onClick={()=>fileRef.current?.click()} style={{ ...mkBtn("ghost"),fontSize:12,display:"flex",alignItems:"center",gap:6 }} disabled={uploading}>
-              <Upload size={13} />{uploading?"Subiendo…":"Subir imagen"}
-            </button>
-            {preview && <button onClick={()=>{ setPreview(null); save("config",{...config,logo_url:null}); }} style={{ ...mkBtn("danger"),fontSize:12,padding:"6px 10px" }}>Quitar</button>}
-          </div>
-        </div>
-      </div>
-    </div>
-  );
-}
-
-function QrUploader({ config, save, user }) {
-  const [uploading, setUploading] = useState(false);
-  const [preview, setPreview] = useState(config?.qr_url || null);
-  const fileRef = useRef(null);
-
-  useEffect(() => { setPreview(config?.qr_url || null); }, [config?.qr_url]);
-
-  const handleFile = (file) => {
-    if (!file) return;
-    if (!file.type.startsWith("image/")) { toast.error("Solo se permiten imágenes"); return; }
-    if (file.size > 1 * 1024 * 1024) { toast.error("La imagen no puede superar 1 MB"); return; }
-    const reader = new FileReader();
-    reader.onload = async (ev) => {
-      const dataUrl = ev.target.result;
-      setPreview(dataUrl);
-      setUploading(true);
-      try {
-        const ext = file.name.split(".").pop() || "png";
-        const path = `${user?.empresa_id || "local"}/qr.${ext}`;
-        const { error: upErr } = await supabase.storage.from("empresa-assets").upload(path, file, { upsert: true });
-        if (upErr) {
-          save("config", { ...config, qr_url: dataUrl });
-          toast.success("QR guardado localmente");
-          return;
-        }
-        const { data: urlData } = supabase.storage.from("empresa-assets").getPublicUrl(path);
-        save("config", { ...config, qr_url: urlData.publicUrl });
-        toast.success("QR actualizado");
-      } catch {
-        save("config", { ...config, qr_url: dataUrl });
-        toast.success("QR guardado localmente");
-      } finally { setUploading(false); }
-    };
-    reader.readAsDataURL(file);
-  };
-
-  return (
-    <div style={{ ...card(), marginBottom: 14 }}>
-      <div style={{ fontWeight: 700, fontSize: 13, marginBottom: 4 }}>Imagen QR de pago</div>
-      <div style={{ fontSize: 12, color: "var(--color-text-faint)", marginBottom: 12 }}>
-        Aparece automáticamente en el POS cuando el cliente paga por QR.
-      </div>
-      <div style={{ display:"flex",gap:16,alignItems:"center",flexWrap:"wrap" }}>
-        <div
-          onClick={() => !uploading && fileRef.current?.click()}
-          onDrop={e=>{ e.preventDefault(); const f=e.dataTransfer.files[0]; if(f)handleFile(f); }}
-          onDragOver={e=>e.preventDefault()}
-          style={{ width:96,height:96,border:`2px dashed var(--color-border)`,borderRadius:14,display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",cursor:uploading?"not-allowed":"pointer",overflow:"hidden",background:"var(--color-bg-primary)",flexShrink:0,transition:"border-color 0.15s" }}
-          onMouseEnter={e=>{ if(!uploading) e.currentTarget.style.borderColor=C.amber; }}
-          onMouseLeave={e=>e.currentTarget.style.borderColor="var(--color-border)"}
-        >
-          {preview
-            ? <img src={preview} alt="QR" style={{ width:"100%",height:"100%",objectFit:"contain" }} />
-            : <><QrCode size={28} color="var(--color-text-faint)" /><div style={{ fontSize:9,color:"var(--color-text-faint)",marginTop:6,textAlign:"center",padding:"0 6px" }}>{uploading?"Subiendo…":"Click / arrastra"}</div></>
-          }
-        </div>
-        <div style={{ flex:1,minWidth:160 }}>
-          <input ref={fileRef} type="file" accept="image/*" style={{ display:"none" }} onChange={e=>handleFile(e.target.files[0])} />
-          <div style={{ display:"flex",gap:8,flexWrap:"wrap" }}>
-            <button onClick={()=>fileRef.current?.click()} style={{ ...mkBtn("ghost"),fontSize:12,display:"flex",alignItems:"center",gap:6 }} disabled={uploading}>
-              <Upload size={13}/>{uploading?"Subiendo…":"Subir QR"}
-            </button>
-            {preview && <button onClick={()=>{ setPreview(null); save("config",{...config,qr_url:null}); }} style={{ ...mkBtn("danger"),fontSize:12,padding:"6px 10px" }}>Quitar</button>}
-          </div>
-        </div>
-      </div>
-    </div>
-  );
-}
-
-function UsuariosAdmin({ D, save, user, logAction, onProfileUpdate }) {
-  const { users, config, activityLogs } = D;
-  const [modal, setModal] = useState(false);
-  const [deleteTarget, setDeleteTarget] = useState(null);
-  const [err, setErr] = useState("");
-  const [isSaving, setIsSaving] = useState(false);
-  const [form, setForm] = useState({ name: "", email: "", username: "", password: "", confirm: "", role: "usuario" });
-  const isSupabaseMode = isSupabaseUser(user);
-  const [businessName, setBusinessName] = useState(config?.businessName || "");
-  const [currencyCode, setCurrencyCode] = useState(config?.currency || "BOB");
-  const [displayName, setDisplayName] = useState(user?.name || "");
-  const [profileSaved, setProfileSaved] = useState(false);
-  const adminCount = users.filter(user => user.role === "admin").length;
-
-  useEffect(() => { setCurrencyCode(config?.currency || "BOB"); }, [config?.currency]);
-
-  const resetForm = () => {
-    setForm({ name: "", email: "", username: "", password: "", confirm: "", role: "usuario" });
-    setErr("");
-  };
-
-  useEffect(() => {
-    setBusinessName(config?.businessName || "");
-  }, [config?.businessName]);
-
-  const openModal = () => {
-    resetForm();
-    setModal(true);
-  };
-
-  const saveUser = async () => {
-    const name = form.name.trim();
-    setErr("");
-
-    // ── Modo Supabase: crear usuario real con email + Supabase Auth ──────────
-    if (isSupabaseMode) {
-      const email = form.email?.trim();
-      if (!name) { setErr("Escribe el nombre completo"); return; }
-      if (!email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) { setErr("Ingresa un email válido"); return; }
-      if (!form.password || form.password.length < 6) { setErr("La contraseña debe tener al menos 6 caracteres"); return; }
-      if (form.password !== form.confirm) { setErr("Las contraseñas no coinciden"); return; }
-      setIsSaving(true);
-      try {
-        // Paso 1: crear usuario en Supabase Auth (cliente temporal, no afecta sesión del admin)
-        const tempClient = _createSupabaseClient(_SUPABASE_URL, _SUPABASE_ANON_KEY, {
-          auth: { storageKey: "moxi_temp_signup", persistSession: false },
-        });
-        let newId;
-        const { data: authData, error: signupErr } = await tempClient.auth.signUp({
-          email, password: form.password,
-          options: { data: { nombre: name } },
-        });
-        if (signupErr) {
-          const isAlreadyRegistered = signupErr.status === 422 || signupErr.message?.toLowerCase().includes("already registered");
-          if (isAlreadyRegistered) {
-            // Auth user ya existe — intentar signIn con la contraseña proporcionada para obtener su UUID
-            const { data: signInData, error: signInErr } = await tempClient.auth.signInWithPassword({ email, password: form.password });
-            if (signInErr) throw new Error("Ese email ya tiene cuenta Supabase. Usa otro email, o pide al trabajador que inicie sesión directamente.");
-            newId = signInData.user?.id;
-          } else {
-            throw signupErr;
-          }
-        } else {
-          newId = authData.user?.id;
-        }
-        if (!newId) throw new Error("No se pudo obtener el ID del usuario de Supabase");
-
-        // Paso 2: crear perfil via RPC SECURITY DEFINER (bypasea RLS de INSERT)
-        const profile = await userService.createWorkerProfile({
-          id: newId, email, nombre: name, role: form.role, empresa_id: user.empresa_id,
-        });
-        if (!profile) throw new Error("Auth creado pero perfil falló — ejecuta el SQL de create_worker_profile en Supabase");
-
-        // Paso 3: actualizar lista local para que el admin vea al nuevo usuario de inmediato
-        save("users", [...users, { id: newId, name, email, role: form.role, empresa_id: user.empresa_id }]);
-        setModal(false);
-        resetForm();
-        logAction?.(`${user.name} creó cuenta para ${name} (${email}) — rol ${ROLE_LABELS[form.role]?.toLowerCase()}`);
-      } catch (e) {
-        console.warn("[UsuariosAdmin] saveUser error:", e.message);
-        setErr(e.message || "Error al crear usuario, inténtalo de nuevo");
-      } finally {
-        setIsSaving(false);
-      }
-      return;
-    }
-
-    // ── Modo local: sistema de usuarios por username+password ────────────────
-    const username = form.username.trim();
-    if (!name || !username || !form.password) { setErr("Completa todos los campos del usuario"); return; }
-    if (form.password.length < 4) { setErr("La contraseña debe tener al menos 4 caracteres"); return; }
-    if (form.password !== form.confirm) { setErr("Las contraseñas no coinciden"); return; }
-    if (users.some(u => u.username?.toLowerCase() === username.toLowerCase())) { setErr("Ese usuario ya existe"); return; }
-    save("users", [
-      ...users,
-      { id: "u" + uid(), name, username, password: form.password, role: form.role, createdAt: new Date().toISOString() },
-    ]);
-    logAction?.(`${user.name} creó la cuenta de ${name} con rol ${ROLE_LABELS[form.role]?.toLowerCase()}`);
-    setModal(false);
-    resetForm();
-  };
-
-  const removeUser = () => {
-    if (!deleteTarget) return;
-    if (deleteTarget.id === user.id) {
-      setErr("No puedes eliminar tu propia cuenta mientras está iniciada");
-      setDeleteTarget(null);
-      return;
-    }
-    if (deleteTarget.role === "admin" && adminCount <= 1) {
-      setErr("Debe existir al menos un administrador");
-      setDeleteTarget(null);
-      return;
-    }
-    save("users", users.filter(user => user.id !== deleteTarget.id));
-    logAction?.(`${user.name} eliminó la cuenta de ${deleteTarget.name}`);
-    setDeleteTarget(null);
-  };
-
-  const saveBusinessConfig = () => {
-    const nextName = businessName.trim();
-    if (!nextName) { setErr("El nombre del negocio no puede quedar vacío"); return; }
-    save("config", {
-      ...config,
-      businessName: nextName,
-      currency: currencyCode,
-      createdAt: config?.createdAt || new Date().toISOString(),
-      updatedAt: new Date().toISOString(),
-    });
-    logAction?.(`${user.name} actualizó la configuración del negocio`);
-    setErr("");
-  };
-
-  const saveDisplayName = async () => {
-    const next = displayName.trim();
-    if (!next) return;
-    await userService.updateProfileName(user.id, next).catch(() => {});
-    onProfileUpdate?.(next);
-    logAction?.(`${user.name} actualizó su nombre de perfil a ${next}`);
-    setProfileSaved(true);
-    setTimeout(() => setProfileSaved(false), 3000);
-  };
-
-  return (
-    <div>
-      <Header
-        title="Ajustes"
-        sub="Configuración de empresa, usuarios y preferencias del sistema"
-        action={<button onClick={openModal} style={mkBtn("primary")}>+ Nuevo usuario</button>}
-      />
-      {err && <div style={{ ...card({ marginBottom: 12, borderLeft: `3px solid ${C.red}` }), color: C.red }}>{err}</div>}
-      {/* Mi Perfil */}
-      <div style={{ ...card(), marginBottom: 14 }}>
-        <div style={{ fontWeight: 700, fontSize: 13, marginBottom: 12 }}>Mi perfil</div>
-        <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
-          <input style={{ ...inp, flex: "1 1 220px" }} value={displayName} onChange={e => setDisplayName(e.target.value)} placeholder="Nombre de display" />
-          <button onClick={saveDisplayName} style={mkBtn("primary")}>Guardar nombre</button>
-          {profileSaved && <span style={{ fontSize: 12, color: C.green, fontWeight: 600 }}>✓ Guardado</span>}
-        </div>
-        <div style={{ fontSize: 12, color: C.textFaint, marginTop: 8 }}>
-          Este nombre se mostrará en el sidebar, comprobantes y registros de actividad. ID: <code style={{ fontSize: 11 }}>{user?.id}</code>
-        </div>
-      </div>
-      <div style={{ ...card(), marginBottom: 14 }}>
-        <div style={{ fontWeight: 700, fontSize: 13, marginBottom: 12 }}>Configuración del negocio</div>
-        <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 10 }}>
-          <input style={{ ...inp, flex: "1 1 200px", margin: 0 }} value={businessName} onChange={e => setBusinessName(e.target.value)} placeholder="Nombre del negocio" />
-          <select style={{ ...inp, margin: 0, flex: "0 0 auto" }} value={currencyCode} onChange={e => setCurrencyCode(e.target.value)}>
-            {CURRENCIES.map(c => <option key={c.code} value={c.code}>{c.symbol} — {c.name}</option>)}
-          </select>
-          <button onClick={saveBusinessConfig} style={mkBtn("primary")}>Guardar</button>
-        </div>
-        <div style={{ fontSize: 12, color: C.textFaint }}>
-          Moneda activa: <strong style={{ color: C.text }}>{formatCurrency(1234.5)}</strong> · Aplica en ventas, POS, reportes, PDF y comprobantes.
-        </div>
-      </div>
-      <LogoUploader config={config} save={save} user={user} />
-      <QrUploader config={config} save={save} user={user} />
-      <div style={card()}>
-        {users.length === 0 ? (
-          <Empty icon="🛡️" title="Sin usuarios" sub="Crea la primera cuenta desde este módulo" />
-        ) : (
-          <Table
-            cols={[
-              { key: "name", label: "Nombre", style: { fontWeight: 600 } },
-              { key: "role", label: "Rol", render: value => <span style={mkBadge(value === "admin" ? "red" : "blue")}>{ROLE_LABELS[value] || value}</span> },
-              { key: "username", label: "Usuario" },
-              { key: "createdAt", label: "Creado", render: value => value ? fDate(value) : "—" },
-              {
-                key: "id",
-                label: "Acciones",
-                render: (_, row) => (
-                  <button
-                    onClick={event => {
-                      event.stopPropagation();
-                      setDeleteTarget(row);
-                      setErr("");
-                    }}
-                    style={{ ...mkBtn("danger"), padding: "6px 10px" }}
-                    disabled={row.id === user.id}
-                  >
-                    Eliminar
-                  </button>
-                ),
-              },
-            ]}
-            rows={users}
-          />
-        )}
-      </div>
-      <div style={{ ...card(), marginTop: 14 }}>
-        <div style={{ fontWeight: 700, fontSize: 13, marginBottom: 12 }}>Log de actividad</div>
-        {(activityLogs || []).length === 0 ? (
-          <Empty icon="🧾" title="Sin actividad registrada" sub="Las acciones relevantes del sistema aparecerán aquí." />
-        ) : (
-          <Table
-            cols={[
-              { key: "userName", label: "Usuario", style: { fontWeight: 600 } },
-              { key: "action", label: "Acción" },
-              { key: "date", label: "Fecha", render: value => fDateTime(value) },
-            ]}
-            rows={(activityLogs || []).slice(0, 50)}
-          />
-        )}
-      </div>
-
-      {modal && (
-        <Modal title="Crear usuario" onClose={() => { setModal(false); resetForm(); }}>
-          <div style={row()}>
-            <div style={{ flex: 1 }}>
-              <label style={lbl}>Nombre completo *</label>
-              <input style={inp} value={form.name} onChange={e => setForm({ ...form, name: e.target.value })} placeholder="Nombre del usuario" autoFocus />
-            </div>
-            <div style={{ flex: 1 }}>
-              <label style={lbl}>Rol *</label>
-              <select style={inp} value={form.role} onChange={e => setForm({ ...form, role: e.target.value })}>
-                {ROLE_OPTIONS.map(role => <option key={role.id} value={role.id}>{role.label}</option>)}
-              </select>
-            </div>
-          </div>
-          {isSupabaseMode ? (
-            <div style={{ marginBottom: 10 }}>
-              <label style={lbl}>Email *</label>
-              <input type="email" style={inp} value={form.email} onChange={e => setForm({ ...form, email: e.target.value })} placeholder="email@ejemplo.com" />
-            </div>
-          ) : (
-            <div style={{ marginBottom: 10 }}>
-              <label style={lbl}>Usuario *</label>
-              <input style={inp} value={form.username} onChange={e => setForm({ ...form, username: e.target.value })} placeholder="Usuario de acceso" />
-            </div>
-          )}
-          <div style={row()}>
-            <div style={{ flex: 1 }}>
-              <label style={lbl}>Contraseña *</label>
-              <input type="password" style={inp} value={form.password} onChange={e => setForm({ ...form, password: e.target.value })} placeholder={isSupabaseMode ? "Mínimo 6 caracteres" : "Mínimo 4 caracteres"} />
-            </div>
-            <div style={{ flex: 1 }}>
-              <label style={lbl}>Confirmar *</label>
-              <input type="password" style={inp} value={form.confirm} onChange={e => setForm({ ...form, confirm: e.target.value })} placeholder="Repite la contraseña" />
-            </div>
-          </div>
-          {isSupabaseMode && (
-            <div style={{ fontSize: 11, color: C.textFaint, marginBottom: 10, lineHeight: 1.5 }}>
-              El usuario recibirá un email de confirmación. Una vez confirmado, podrá iniciar sesión con sus credenciales y verá los datos de tu empresa automáticamente.
-            </div>
-          )}
-          <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
-            <button onClick={() => { setModal(false); resetForm(); }} style={mkBtn("ghost")}>Cancelar</button>
-            <button onClick={saveUser} disabled={isSaving} style={{...mkBtn("primary"),opacity:isSaving?0.6:1}}>{isSaving ? "Creando…" : "Guardar usuario"}</button>
-          </div>
-        </Modal>
-      )}
-
-      {deleteTarget && (
-        <Modal title="Eliminar usuario" onClose={() => setDeleteTarget(null)} width={420}>
-          <div style={{ fontSize: 13, color: C.textMid, marginBottom: 16 }}>
-            Vas a eliminar a <strong style={{ color: C.text }}>{deleteTarget.name}</strong>. Esta acción quitará su acceso al sistema.
-          </div>
-          <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
-            <button onClick={() => setDeleteTarget(null)} style={mkBtn("ghost")}>Cancelar</button>
-            <button onClick={removeUser} style={mkBtn("danger")}>Eliminar</button>
-          </div>
-        </Modal>
-      )}
-    </div>
-  );
-}
 
 
 // ╔══════════════════════════════════════════════════════════════════════╗
@@ -2712,7 +2271,7 @@ function Pedidos({ D, save, user, config, logAction, onRefreshDashboard }) {
               <input type="number" min="0" value={form.discount} onChange={e=>setForm(f=>({...f,discount:e.target.value}))} placeholder="0" style={{...inp,flex:1}}/>
               <select value={form.discountType} onChange={e=>setForm(f=>({...f,discountType:e.target.value}))} style={{...inp,width:64,cursor:"pointer",padding:"8px 4px"}}>
                 <option value="pct">%</option>
-                <option value="amount">{_currencySymbol}</option>
+                <option value="amount">{getCurrencySymbol()}</option>
               </select>
             </div>
           </div>
@@ -3181,14 +2740,14 @@ function Ventas({ D, save, user, config, logAction, onRefreshDashboard }) {
                         <span style={{fontSize:11,color:C.textMid,fontWeight:600,flexShrink:0}}>Descuento</span>
                         <button onClick={()=>setForm(f=>({...f,discountType:f.discountType==="pct"?"fixed":"pct"}))}
                           style={{...mkBtn("ghost"),fontSize:11,padding:"4px 8px",flexShrink:0,minWidth:34}}>
-                          {form.discountType==="pct"?"%":_currencySymbol}
+                          {form.discountType==="pct"?"%":getCurrencySymbol()}
                         </button>
                         <input type="number" min="0" step="0.01" value={form.discount} onChange={e=>setForm(f=>({...f,discount:e.target.value}))}
-                          placeholder={form.discountType==="pct"?`0 %`:`0 ${_currencySymbol}`} style={{...inp,margin:0,flex:1,fontSize:12}}/>
+                          placeholder={form.discountType==="pct"?`0 %`:`0 ${getCurrencySymbol()}`} style={{...inp,margin:0,flex:1,fontSize:12}}/>
                         {discountAmt>0&&<span style={{fontSize:11,color:C.green,fontWeight:700,flexShrink:0}}>−{Bs(discountAmt)}</span>}
                       </div>
                       <div style={{display:"flex",gap:8,alignItems:"center",marginBottom:8}}>
-                        <input type="number" min="0" step="0.5" value={form.paid} onChange={e=>setForm(f=>({...f,paid:e.target.value}))} placeholder={`Monto recibido ${_currencySymbol}`} style={{...inp,margin:0,flex:1,fontSize:13,fontWeight:600}}/>
+                        <input type="number" min="0" step="0.5" value={form.paid} onChange={e=>setForm(f=>({...f,paid:e.target.value}))} placeholder={`Monto recibido ${getCurrencySymbol()}`} style={{...inp,margin:0,flex:1,fontSize:13,fontWeight:600}}/>
                         <button onClick={()=>setForm(f=>({...f,paid:total.toFixed(2)}))} style={{...mkBtn("ghost"),fontSize:12,padding:"8px 12px",flexShrink:0}}>Todo</button>
                       </div>
                       {debtN>0&&<div style={{display:"flex",justifyContent:"space-between",padding:"7px 10px",background:C.amberBg,borderRadius:R.sm,marginBottom:8,border:`1px solid ${C.amberMid}`}}>
@@ -3399,7 +2958,7 @@ function Ventas({ D, save, user, config, logAction, onRefreshDashboard }) {
                         <span style={{fontSize:11,color:C.textMid,fontWeight:600,flexShrink:0}}>Descuento</span>
                         <button onClick={()=>setForm(f=>({...f,discountType:f.discountType==="pct"?"fixed":"pct"}))}
                           style={{...mkBtn("ghost"),fontSize:10,padding:"3px 6px",flexShrink:0,minWidth:28}}>
-                          {form.discountType==="pct"?"%":_currencySymbol}
+                          {form.discountType==="pct"?"%":getCurrencySymbol()}
                         </button>
                         <input type="number" min="0" step="0.01" value={form.discount} onChange={e=>setForm(f=>({...f,discount:e.target.value}))}
                           placeholder="0" style={{...inp,margin:0,flex:1,fontSize:12}}/>
@@ -3407,7 +2966,7 @@ function Ventas({ D, save, user, config, logAction, onRefreshDashboard }) {
                       </div>
                       {/* Paid + debt */}
                       <div style={{display:"flex",gap:8,alignItems:"center",marginBottom:6}}>
-                        <input type="number" min="0" step="0.5" value={form.paid} onChange={e=>setForm(f=>({...f,paid:e.target.value}))} placeholder={`Monto recibido ${_currencySymbol}`} style={{...inp,margin:0,flex:1,fontSize:13,fontWeight:600}}/>
+                        <input type="number" min="0" step="0.5" value={form.paid} onChange={e=>setForm(f=>({...f,paid:e.target.value}))} placeholder={`Monto recibido ${getCurrencySymbol()}`} style={{...inp,margin:0,flex:1,fontSize:13,fontWeight:600}}/>
                         <button onClick={()=>setForm(f=>({...f,paid:total.toFixed(2)}))} style={{...mkBtn("ghost"),fontSize:11,padding:"7px 10px",flexShrink:0}}>Todo</button>
                       </div>
                       {debtN>0&&<div style={{display:"flex",justifyContent:"space-between",padding:"5px 8px",background:C.amberBg,borderRadius:R.sm,marginBottom:6,border:`1px solid ${C.amberMid}`}}>
@@ -4566,10 +4125,7 @@ const init = async () => {
 
       const cats = ensureCategories(storedCategories, rawProducts);
       // Aplicar moneda guardada antes del primer render
-      if (config?.currency) {
-        const cur = CURRENCIES.find(c => c.code === config.currency);
-        if (cur) _currencySymbol = cur.symbol;
-      }
+      if (config?.currency) applyCurrencyCode(config.currency);
       setData({
         customers:    normalizeCustomers(rawCustomers),
         products:     sanitizeProducts(rawProducts, cats),
@@ -4640,7 +4196,7 @@ const init = async () => {
         // no limpiar — evita race condition logout-rápido → nuevo-login.
         if (userRef.current) return;
         _currentEmpresaId = null;
-        _currencySymbol   = "Bs.";
+        resetCurrency();
         dataRef.current   = null;
         setUser(null);
         setData(createEmptyAppState());
@@ -4698,10 +4254,7 @@ const init = async () => {
         return next;
       });
       // Sincronizar símbolo de moneda con la config del scope recién cargado
-      if (scopedConfig?.currency) {
-        const cur = CURRENCIES.find(c => c.code === scopedConfig.currency);
-        if (cur) { _currencySymbol = cur.symbol; _currencyLocale = cur.locale; }
-      }
+      if (scopedConfig?.currency) applyCurrencyCode(scopedConfig.currency);
     }).catch((err) => { console.warn("[App] hydration failed:", err?.message ?? err); }).finally(() => setIsLoadingScope(false));
   }, [user?.empresa_id]); // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -4785,11 +4338,7 @@ const init = async () => {
     // Sincronizar a Supabase si aplica (fire-and-forget, nunca bloquea UI)
     if (SYNC_KEYS.has(key)) syncDiff(key, dataRef.current?.[key], value, userRef.current);
     // Actualizar moneda global al instante cuando se guarda config
-    if (key === "config" && value?.currency) {
-      const cur = CURRENCIES.find(c => c.code === value.currency);
-      _currencySymbol = cur?.symbol ?? "Bs.";
-      _currencyLocale = cur?.locale ?? "es-BO";
-    }
+    if (key === "config" && value?.currency) applyCurrencyCode(value.currency);
     setData(d=>({...d,[key]:value}));
     persistValue(key, value);
   },[]);
