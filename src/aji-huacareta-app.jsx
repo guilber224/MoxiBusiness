@@ -28,54 +28,21 @@ import {
 } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
 import toast, { Toaster } from "react-hot-toast";
-// ╔══════════════════════════════════════════════════════════════════════╗
-// ║  DESIGN SYSTEM — TOKENS                                            ║
-// ╚══════════════════════════════════════════════════════════════════════╝
-const C = {
-  // Core palette — brand navy + sky blue
-  red: "#EF4444", redHover: "#DC2626", redBg: "#FEF2F2", redMid: "#FCA5A5",
-  amber: "#F59E0B", amberBg: "#FFFBEB", amberMid: "#FCD34D",
-  green: "#10B981", greenBg: "#ECFDF5", greenMid: "#6EE7B7",
-  blue: "#22C5FE", blueBg: "#EFF6FF", blueMid: "#93C5FD",
-  // Neutrals — CSS variable–backed for dark/light support
-  sidebar: "var(--color-sidebar-bg)",
-  sidebarBorder: "var(--color-sidebar-border)",
-  sidebarText: "var(--color-sidebar-text)",
-  sidebarActive: "var(--color-sidebar-active)",
-  bg: "var(--color-bg-primary)",
-  surface: "var(--color-bg-surface)",
-  border: "var(--color-border)",
-  borderMid: "var(--color-border-mid)",
-  text: "var(--color-text)",
-  textMid: "var(--color-text-mid)",
-  textFaint: "var(--color-text-faint)",
-  // Semantic
-  danger: "#EF4444", warning: "#F59E0B", success: "#10B981", info: "#111E7B",
-  // Brand
-  brand: "#111E7B", brandLight: "#22C5FE",
-};
-
-// ── Theme context ──────────────────────────────────────────────────────────
-const ThemeCtx = createContext({ isDark: false, toggle: () => {} });
-const useTheme = () => useContext(ThemeCtx);
-function ThemeProvider({ children }) {
-  const [isDark, setIsDark] = useState(() => {
-    try { return localStorage.getItem("moxi_theme") === "dark"; } catch { return false; }
-  });
-  useEffect(() => {
-    document.documentElement.classList.toggle("dark", isDark);
-    try { localStorage.setItem("moxi_theme", isDark ? "dark" : "light"); } catch {}
-  }, [isDark]);
-  const toggle = useCallback(() => setIsDark(v => !v), []);
-  return <ThemeCtx.Provider value={{ isDark, toggle }}>{children}</ThemeCtx.Provider>;
-}
-
-// Typography
-const FONT = "'Inter', 'SF Pro Display', -apple-system, sans-serif";
-
-// Spacing / radius
-const R = { sm: 6, md: 8, lg: 12, xl: 16 };
-
+import { BRAND_NAME, BRAND_SUBTITLE, C, R, FONT, ThemeProvider, useTheme } from "./theme.jsx";
+import { card, lbl, inp, row, mkBtn, mkBadge } from "./styles.js";
+import { useIsMobile } from "./hooks/useIsMobile.js";
+import { Modal } from "./components/ui/Modal.jsx";
+import { Empty } from "./components/ui/Empty.jsx";
+import { Header } from "./components/ui/Header.jsx";
+import { Chip } from "./components/ui/Chip.jsx";
+import { KPI } from "./components/ui/KPI.jsx";
+import { Table } from "./components/ui/Table.jsx";
+import { SearchInput } from "./components/ui/SearchInput.jsx";
+import { BrandLogo } from "./components/ui/BrandLogo.jsx";
+import { ThemeToggle } from "./components/ThemeToggle.jsx";
+import { NotificacionesDropdown } from "./components/NotificacionesDropdown.jsx";
+import { BottomNav } from "./components/BottomNav.jsx";
+import { NAV_GROUPS, ROLE_OPTIONS, ROLE_LABELS, ROLES, NAV_ICONS } from "./navConfig.js";
 // ╔══════════════════════════════════════════════════════════════════════╗
 // ║  STORAGE                                                           ║
 // ╚══════════════════════════════════════════════════════════════════════╝
@@ -109,8 +76,6 @@ let _currencyLocale = "es-BO";
 const formatCurrency = v => `${_currencySymbol} ${n(v).toLocaleString(_currencyLocale,{minimumFractionDigits:2,maximumFractionDigits:2})}`;
 const Bs = formatCurrency;
 
-const BRAND_NAME = "Moxi Business";
-const BRAND_SUBTITLE = "ERP + POS Empresarial";
 // Persistencia Moxi: migra a nuevas claves sin perder datos históricos guardados localmente.
 const STORAGE_KEYS = {
   customers: "moxi_customers",
@@ -443,31 +408,6 @@ const FORMULAS0 = [
 const CUSTOMERS0 = [];
 
 // ╔══════════════════════════════════════════════════════════════════════╗
-// ║  CSS HELPERS                                                        ║
-// ╚══════════════════════════════════════════════════════════════════════╝
-const card = (extra={}) => ({ background: "var(--color-bg-surface)", border: "1px solid var(--color-border)", borderRadius: 14, padding: "1rem 1.25rem", boxShadow: "0 1px 3px rgba(0,0,0,0.06)", ...extra });
-const lbl = { fontSize: 11, color: "var(--color-text-mid)", fontWeight: 600, letterSpacing: "0.055em", textTransform: "uppercase", display: "block", marginBottom: 4 };
-const inp = { width: "100%", padding: "8px 11px", fontSize: 13, border: "1px solid var(--color-border)", borderRadius: R.md, background: "var(--color-bg-surface)", color: "var(--color-text)", boxSizing: "border-box", outline: "none", fontFamily: FONT, transition: "border 0.15s" };
-const row = g => ({ display:"flex", gap:g||10, marginBottom:10 });
-const mkBtn = (variant="default") => {
-  const base = { padding:"7px 14px", borderRadius:R.md, cursor:"pointer", fontSize:13, fontWeight:500, border:"none", display:"inline-flex", alignItems:"center", gap:6, fontFamily:FONT, letterSpacing:"-0.01em", transition:"opacity 0.1s, background 0.1s", whiteSpace:"nowrap" };
-  return { ...base, ...({
-    primary: { background: "#111E7B", color: "white" },
-    ghost:   { background: "transparent", color: "var(--color-text-mid)", border: "1px solid var(--color-border)" },
-    danger:  { background: C.redBg, color: C.red },
-    success: { background: C.greenBg, color: C.green },
-    warning: { background: C.amberBg, color: C.amber },
-    subtle:  { background: "var(--color-bg-primary)", color: "var(--color-text)", border: "1px solid var(--color-border)" },
-    default: { background: "var(--color-bg-primary)", color: "var(--color-text)", border: "1px solid var(--color-border)" },
-  }[variant]) };
-};
-const mkBadge = (v="gray") => {
-  const m = { red:[C.redBg,C.red], amber:[C.amberBg,C.amber], green:[C.greenBg,C.green], blue:[C.blueBg,C.blue], gray:["#F2F0EB",C.textMid] };
-  const [bg,fg] = m[v]||m.gray;
-  return { display:"inline-flex", alignItems:"center", padding:"2px 8px", borderRadius:20, fontSize:11, fontWeight:600, background:bg, color:fg, whiteSpace:"nowrap" };
-};
-
-// ╔══════════════════════════════════════════════════════════════════════╗
 // ║  CHART DATA GENERATOR                                               ║
 // ╚══════════════════════════════════════════════════════════════════════╝
 function buildChart(sales, period) {
@@ -522,163 +462,6 @@ async function xlsx(sheets, filename) {
   XLSX.writeFile(wb,filename);
 }
 
-// ╔══════════════════════════════════════════════════════════════════════╗
-// ║  SHARED UI COMPONENTS                                               ║
-// ╚══════════════════════════════════════════════════════════════════════╝
-function Modal({ title, onClose, children, width = 560 }) {
-  return (
-    <div onClick={e => e.target === e.currentTarget && onClose()} style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.52)", zIndex: 200, display: "flex", alignItems: "flex-start", justifyContent: "center", padding: "40px 16px", overflowY: "auto", backdropFilter: "blur(4px)" }}>
-      <div style={{ background: "var(--color-bg-surface)", borderRadius: 16, width: "100%", maxWidth: width, border: "1px solid var(--color-border)", boxShadow: "0 24px 64px rgba(0,0,0,0.18)" }}>
-        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "16px 20px", borderBottom: "1px solid var(--color-border)" }}>
-          <span style={{ fontWeight: 700, fontSize: 15, letterSpacing: "-0.02em", color: "var(--color-text)" }}>{title}</span>
-          <button onClick={onClose} style={{ background: "none", border: "none", cursor: "pointer", color: "var(--color-text-mid)", fontSize: 20, lineHeight: 1, padding: "0 2px", display: "flex", alignItems: "center" }}>
-            <X size={18} strokeWidth={1.8} />
-          </button>
-        </div>
-        <div style={{ padding: "20px 20px 24px" }}>{children}</div>
-      </div>
-    </div>
-  );
-}
-
-function Empty({ icon, title, sub, action }) {
-  return (
-    <div style={{textAlign:"center",padding:"3rem 1rem"}}>
-      <div style={{fontSize:36,marginBottom:10}}>{icon||"📭"}</div>
-      <div style={{fontWeight:600,fontSize:14,marginBottom:4}}>{title}</div>
-      <div style={{fontSize:13,color:C.textMid,marginBottom:action?14:0}}>{sub}</div>
-      {action}
-    </div>
-  );
-}
-
-function Header({ title, sub, action }) {
-  return (
-    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 22 }}>
-      <div>
-        <h2 style={{ margin: 0, fontSize: 22, fontWeight: 700, letterSpacing: "-0.03em", color: "var(--color-text)" }}>{title}</h2>
-        {sub && <p style={{ margin: "4px 0 0", fontSize: 13, color: "var(--color-text-mid)" }}>{sub}</p>}
-      </div>
-      {action && <div style={{ display: "flex", gap: 8 }}>{action}</div>}
-    </div>
-  );
-}
-
-function Chip({ value, onChange, options }) {
-  const isMobileChip = useIsMobile();
-  if (isMobileChip) {
-    return (
-      <select value={value} onChange={e => onChange(e.target.value)}
-        style={{
-          padding: "6px 10px", borderRadius: 10, cursor: "pointer",
-          fontSize: 13, fontFamily: FONT, fontWeight: 600,
-          background: "var(--color-bg-surface)",
-          color: "var(--color-text)",
-          border: "1px solid var(--color-border)",
-          outline: "none",
-        }}>
-        {options.map(([v, l]) => (
-          <option key={v} value={v}>{l}</option>
-        ))}
-      </select>
-    );
-  }
-  return (
-    <div style={{ display: "flex", gap: 3, flexWrap: "wrap" }}>
-      {options.map(([v, l]) => (
-        <button key={v} onClick={() => onChange(v)}
-          style={{
-            padding: "5px 12px", borderRadius: 20, cursor: "pointer",
-            fontSize: 12, fontWeight: 500, fontFamily: FONT,
-            background: value === v ? "#111E7B" : "var(--color-bg-primary)",
-            color: value === v ? "white" : "var(--color-text-mid)",
-            border: value === v ? "1px solid #111E7B" : "1px solid var(--color-border)",
-            transition: "background 0.15s, color 0.15s",
-          }}
-        >{l}</button>
-      ))}
-    </div>
-  );
-}
-
-function KPI({ label, value, sub, color = "var(--color-text)", Icon }) {
-  return (
-    <div style={{ ...card(), flex: 1, minWidth: 0 }}>
-      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
-        <div style={{ flex: 1, minWidth: 0 }}>
-          <div style={{ ...lbl, marginBottom: 6 }}>{label}</div>
-          <div style={{ fontSize: 22, fontWeight: 700, letterSpacing: "-0.04em", color, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{value}</div>
-          {sub && <div style={{ fontSize: 12, color: "var(--color-text-faint)", marginTop: 3 }}>{sub}</div>}
-        </div>
-        {Icon && (
-          <div style={{ width: 36, height: 36, background: "var(--color-bg-primary)", borderRadius: R.md, display: "flex", alignItems: "center", justifyContent: "center", border: "1px solid var(--color-border)", flexShrink: 0, marginLeft: 8 }}>
-            <span style={{ fontSize: 16 }}>{Icon}</span>
-          </div>
-        )}
-      </div>
-    </div>
-  );
-}
-
-function Table({ cols, rows, onRowClick }) {
-  if(!rows.length) return null;
-  return (
-    <div style={{overflowX:"auto"}}>
-      <table style={{width:"100%",borderCollapse:"collapse",minWidth:400}}>
-        <thead><tr>{cols.map(c=><th key={c.key} style={{textAlign:"left",fontSize:11,color:C.textMid,fontWeight:600,padding:"7px 12px",borderBottom:`1px solid ${C.border}`,textTransform:"uppercase",letterSpacing:"0.05em",whiteSpace:"nowrap"}}>{c.label}</th>)}</tr></thead>
-        <tbody>{rows.map((row,i)=>(
-          <tr key={row.id||i} onClick={()=>onRowClick&&onRowClick(row)} style={{cursor:onRowClick?"pointer":"default",transition:"background 0.1s"}} onMouseEnter={e=>{if(onRowClick)e.currentTarget.style.background=C.bg}} onMouseLeave={e=>{e.currentTarget.style.background=""}}>
-            {cols.map(c=><td key={c.key} style={{padding:"9px 12px",fontSize:13,borderBottom:`1px solid ${C.border}`,color:C.text,...(c.style||{})}}>{c.render?c.render(row[c.key],row):row[c.key]}</td>)}
-          </tr>
-        ))}</tbody>
-      </table>
-    </div>
-  );
-}
-
-function SearchInput({ value, onChange, placeholder="Buscar..." }) {
-  return (
-    <div style={{position:"relative",flex:1}}>
-      <span style={{position:"absolute",left:10,top:"50%",transform:"translateY(-50%)",display:"flex",alignItems:"center"}}>
-        <Search size={14} strokeWidth={1.8} color="var(--color-text-faint)" />
-      </span>
-      <input value={value} onChange={e=>onChange(e.target.value)} placeholder={placeholder} style={{...inp,paddingLeft:32}} />
-    </div>
-  );
-}
-
-// Logo vectorial integrado a partir de la referencia visual entregada para mantenerlo portable en React y HTML.
-function BrandLogo({ size=48 }) {
-  const ids = useRef({
-    metal: `moxi-metal-${uid()}`,
-    accent: `moxi-accent-${uid()}`,
-    shadow: `moxi-shadow-${uid()}`,
-  }).current;
-
-  return (
-    <svg width={size} height={size * 0.78} viewBox="0 0 460 360" role="img" aria-label={BRAND_NAME}>
-      <defs>
-        <linearGradient id={ids.metal} x1="0%" y1="0%" x2="100%" y2="100%">
-          <stop offset="0%" stopColor="#DCE6EF" />
-          <stop offset="38%" stopColor="#8FA3B6" />
-          <stop offset="100%" stopColor="#4B5F72" />
-        </linearGradient>
-        <linearGradient id={ids.accent} x1="0%" y1="0%" x2="100%" y2="100%">
-          <stop offset="0%" stopColor="#93C5FD" />
-          <stop offset="100%" stopColor="#1E3A8A" />
-        </linearGradient>
-        <filter id={ids.shadow} x="-20%" y="-20%" width="140%" height="160%">
-          <feDropShadow dx="0" dy="10" stdDeviation="10" floodColor="#0F172A" floodOpacity="0.28" />
-        </filter>
-      </defs>
-      <g filter={`url(#${ids.shadow})`}>
-        <path d="M54 254 156 58l74 146 74-146 102 196-92-45-40-76-38 75h-12l-38-75-39 76Z" fill={`url(#${ids.metal})`} stroke="#5B7287" strokeWidth="10" strokeLinejoin="round" />
-        <path d="M30 308c118-70 281-70 398 0-118-26-281-26-398 0Z" fill={`url(#${ids.accent})`} opacity="0.18" />
-        <path d="M18 312c127-92 297-92 424 0-122-47-297-47-424 0Z" fill={`url(#${ids.metal})`} stroke="#516578" strokeWidth="10" strokeLinejoin="round" />
-      </g>
-    </svg>
-  );
-}
 
 const SECTORS_COLORS = [C.brandLight, C.green, C.warning, C.danger, "#7C3AED", "#0891B2"];
 
@@ -1132,45 +915,6 @@ function OnboardingIncompleteScreen({ onRetry, onLogout }) {
 // ╔══════════════════════════════════════════════════════════════════════╗
 // ║  SIDEBAR                                                            ║
 // ╚══════════════════════════════════════════════════════════════════════╝
-const NAV_GROUPS = [
-  { label:"General",   items:[{id:"dashboard",label:"Panel Principal"}] },
-  { label:"Comercial", items:[{id:"clientes",label:"Clientes"},{id:"ventas",label:"Ventas"},{id:"pedidos",label:"Pedidos"},{id:"gastos",label:"Gastos"},{id:"deudas",label:"Deudas"}] },
-  { label:"Operaciones",items:[{id:"productos",label:"Productos"},{id:"inventario",label:"Inventario"},{id:"produccion",label:"Producción"},{id:"proveedores",label:"Proveedores"}] },
-  { label:"Finanzas",  items:[{id:"caja",label:"Flujo de Caja"},{id:"analisis",label:"Análisis"},{id:"exportar",label:"Exportar Datos"}] },
-  { label:"Administración", items:[{id:"usuarios",label:"Ajustes"}] },
-];
-const ROLE_OPTIONS = [
-  { id:"admin",    label:"Administrador" },
-  { id:"vendedor", label:"Vendedor" },
-  { id:"operador", label:"Operador" },
-  { id:"usuario",  label:"Usuario" },
-];
-const ROLE_LABELS = Object.fromEntries(ROLE_OPTIONS.map(role => [role.id, role.label]));
-const ROLES = {
-  admin:    ["dashboard","clientes","ventas","pedidos","deudas","productos","inventario","produccion","proveedores","caja","gastos","analisis","exportar","usuarios"],
-  vendedor: ["dashboard","clientes","ventas","pedidos","deudas","caja","gastos"],
-  operador: ["dashboard","productos","inventario","produccion"],
-  usuario:  ["ventas"],
-};
-
-// Lucide icon components mapped by nav id
-const NAV_ICONS = {
-  dashboard:   LayoutDashboard,
-  clientes:    Users,
-  ventas:      ShoppingCart,
-  pedidos:     ClipboardList,
-  deudas:      CreditCard,
-  productos:   Package,
-  inventario:  Archive,
-  produccion:  Factory,
-  proveedores: Truck,
-  caja:        Wallet,
-  gastos:      TrendingDown,
-  analisis:    BarChart2,
-  exportar:    Download,
-  usuarios:    Settings,
-};
-
 function Sidebar({ tab, setTab, user, onLogout, config, open, onClose, collapsed, onToggleCollapse }) {
   const isMobile = useIsMobile();
   const allowed = ROLES[user.role] || [];
@@ -1772,167 +1516,6 @@ function UsuariosAdmin({ D, save, user, logAction, onProfileUpdate }) {
   );
 }
 
-// ── Theme Toggle Button ────────────────────────────────────────────────────
-function ThemeToggle() {
-  const { isDark, toggle } = useTheme();
-  return (
-    <button onClick={toggle} title={isDark ? "Modo claro" : "Modo oscuro"}
-      style={{
-        width:36,height:36,borderRadius:10,border:"1px solid var(--color-border)",
-        background:"var(--color-bg-primary)",cursor:"pointer",
-        display:"flex",alignItems:"center",justifyContent:"center",
-        transition:"background 0.15s,border-color 0.15s",flexShrink:0,
-      }}
-      onMouseEnter={e=>e.currentTarget.style.background="var(--color-border)"}
-      onMouseLeave={e=>e.currentTarget.style.background="var(--color-bg-primary)"}
-    >
-      {isDark
-        ? <Sun size={16} strokeWidth={1.8} color="var(--color-text-mid)" />
-        : <Moon size={16} strokeWidth={1.8} color="var(--color-text-mid)" />}
-    </button>
-  );
-}
-
-// ── Notifications dropdown ────────────────────────────────────────────────
-function NotificacionesDropdown({ debtClients, lowStock, setTab }) {
-  const [open, setOpen] = useState(false);
-  const ref = useRef(null);
-  const total = (debtClients?.length || 0) + (lowStock?.length || 0);
-
-  useEffect(() => {
-    const handle = e => { if (ref.current && !ref.current.contains(e.target)) setOpen(false); };
-    document.addEventListener("mousedown", handle);
-    return () => document.removeEventListener("mousedown", handle);
-  }, []);
-
-  return (
-    <div ref={ref} style={{ position: "relative" }}>
-      <button onClick={() => setOpen(v => !v)} title="Notificaciones"
-        style={{ width:36,height:36,borderRadius:10,border:"1px solid var(--color-border)",background:open?"var(--color-border)":"var(--color-bg-primary)",cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"center",position:"relative",transition:"background 0.15s" }}
-        onMouseEnter={e=>{ if(!open) e.currentTarget.style.background="var(--color-border)"; }}
-        onMouseLeave={e=>{ if(!open) e.currentTarget.style.background="var(--color-bg-primary)"; }}
-      >
-        <Bell size={17} strokeWidth={1.8} color="var(--color-text-mid)" />
-        {total > 0 && <span style={{ position:"absolute",top:5,right:5,width:8,height:8,borderRadius:"50%",background:C.danger,border:"1.5px solid var(--color-bg-surface)" }} />}
-      </button>
-      {open && (
-        <div style={{ position:"absolute",top:"calc(100% + 8px)",right:0,width:300,background:"var(--color-bg-surface)",border:"1px solid var(--color-border)",borderRadius:14,boxShadow:"0 8px 32px rgba(0,0,0,0.14)",zIndex:500,overflow:"hidden" }}>
-          <div style={{ padding:"14px 16px 10px",fontWeight:700,fontSize:13,borderBottom:"1px solid var(--color-border)",display:"flex",justifyContent:"space-between",alignItems:"center" }}>
-            Notificaciones
-            {total > 0 && <span style={{ ...mkBadge("red"),fontSize:10 }}>{total}</span>}
-          </div>
-          <div style={{ maxHeight:320,overflowY:"auto" }}>
-            {total === 0 ? (
-              <div style={{ padding:"24px 16px",textAlign:"center",fontSize:12,color:"var(--color-text-faint)" }}>
-                <CheckCircle size={28} color={C.green} style={{ display:"block",margin:"0 auto 8px" }} />
-                Todo en orden
-              </div>
-            ) : (
-              <>
-                {(debtClients?.length > 0) && (
-                  <div>
-                    <div style={{ padding:"8px 16px 4px",fontSize:10,fontWeight:700,color:"var(--color-text-faint)",letterSpacing:"0.08em",textTransform:"uppercase" }}>Deudas pendientes</div>
-                    {debtClients.slice(0,5).map(c=>(
-                      <button key={c.id} onClick={()=>{ setTab("deudas"); setOpen(false); }}
-                        style={{ width:"100%",display:"flex",alignItems:"center",gap:10,padding:"8px 16px",background:"none",border:"none",cursor:"pointer",textAlign:"left",transition:"background 0.12s",fontFamily:FONT }}
-                        onMouseEnter={e=>e.currentTarget.style.background="var(--color-bg-primary)"}
-                        onMouseLeave={e=>e.currentTarget.style.background="none"}
-                      >
-                        <div style={{ width:28,height:28,borderRadius:8,background:C.danger+"18",display:"flex",alignItems:"center",justifyContent:"center",flexShrink:0 }}>
-                          <CreditCard size={13} color={C.danger} />
-                        </div>
-                        <div>
-                          <div style={{ fontSize:12,fontWeight:600,color:"var(--color-text)" }}>{c.name}</div>
-                          <div style={{ fontSize:11,color:"var(--color-text-faint)" }}>Deuda pendiente</div>
-                        </div>
-                      </button>
-                    ))}
-                    {debtClients.length > 5 && <div style={{ padding:"4px 16px 8px",fontSize:11,color:"var(--color-text-faint)" }}>+{debtClients.length-5} más</div>}
-                  </div>
-                )}
-                {(lowStock?.length > 0) && (
-                  <div>
-                    <div style={{ padding:"8px 16px 4px",fontSize:10,fontWeight:700,color:"var(--color-text-faint)",letterSpacing:"0.08em",textTransform:"uppercase" }}>Stock bajo</div>
-                    {lowStock.slice(0,4).map(p=>(
-                      <button key={p.id} onClick={()=>{ setTab("inventario"); setOpen(false); }}
-                        style={{ width:"100%",display:"flex",alignItems:"center",gap:10,padding:"8px 16px",background:"none",border:"none",cursor:"pointer",textAlign:"left",transition:"background 0.12s",fontFamily:FONT }}
-                        onMouseEnter={e=>e.currentTarget.style.background="var(--color-bg-primary)"}
-                        onMouseLeave={e=>e.currentTarget.style.background="none"}
-                      >
-                        <div style={{ width:28,height:28,borderRadius:8,background:C.amber+"18",display:"flex",alignItems:"center",justifyContent:"center",flexShrink:0 }}>
-                          <AlertTriangle size={13} color={C.amber} />
-                        </div>
-                        <div>
-                          <div style={{ fontSize:12,fontWeight:600,color:"var(--color-text)" }}>{p.name}</div>
-                          <div style={{ fontSize:11,color:"var(--color-text-faint)" }}>Stock bajo</div>
-                        </div>
-                      </button>
-                    ))}
-                    {lowStock.length > 4 && <div style={{ padding:"4px 16px 8px",fontSize:11,color:"var(--color-text-faint)" }}>+{lowStock.length-4} más</div>}
-                  </div>
-                )}
-              </>
-            )}
-          </div>
-          {total > 0 && (
-            <div style={{ padding:"8px 16px",borderTop:"1px solid var(--color-border)" }}>
-              <button onClick={()=>{ setTab("analisis"); setOpen(false); }} style={{ ...mkBtn("ghost"),width:"100%",justifyContent:"center",fontSize:12 }}>Ver resumen completo →</button>
-            </div>
-          )}
-        </div>
-      )}
-    </div>
-  );
-}
-
-// ── Bottom Navigation (mobile only) ──────────────────────────────────────
-const BOTTOM_NAV = [
-  { id: "dashboard",  label: "Inicio",     Icon: Home },
-  { id: "clientes",   label: "Clientes",   Icon: Users },
-  { id: "ventas",     label: "Ventas",     Icon: ShoppingCart },
-  { id: "inventario", label: "Inventario", Icon: Archive },
-  { id: "caja",       label: "Más",        Icon: MoreHorizontal },
-];
-function BottomNav({ tab, setTab, user }) {
-  const allowed = ROLES[user?.role] || [];
-  const items = BOTTOM_NAV.filter(n => allowed.includes(n.id));
-  return (
-    <div style={{
-      display:"flex",position:"fixed",bottom:0,left:0,right:0,
-      background:"var(--color-bg-surface)",borderTop:"1px solid var(--color-border)",
-      zIndex:200,paddingBottom:"env(safe-area-inset-bottom,0px)",
-    }}>
-      {items.map(({ id, label, Icon }) => {
-        const active = tab === id;
-        return (
-          <button key={id} onClick={() => setTab(id)}
-            style={{
-              flex:1,display:"flex",flexDirection:"column",alignItems:"center",
-              justifyContent:"center",padding:"10px 0 8px",border:"none",
-              background:"transparent",cursor:"pointer",fontFamily:FONT,
-              color: active ? "var(--color-brand)" : "var(--color-text-faint)",
-              transition:"color 0.15s",
-            }}
-          >
-            <Icon size={20} strokeWidth={active ? 2.2 : 1.7} />
-            <span style={{fontSize:10,marginTop:2,fontWeight:active?700:400}}>{label}</span>
-          </button>
-        );
-      })}
-    </div>
-  );
-}
-
-// Hook responsive — retorna true si la pantalla es menor al breakpoint
-function useIsMobile(breakpoint=768){
-  const [is,setIs]=useState(()=>typeof window!=="undefined"?window.innerWidth<breakpoint:false);
-  useEffect(()=>{
-    const h=()=>setIs(window.innerWidth<breakpoint);
-    window.addEventListener("resize",h);
-    return ()=>window.removeEventListener("resize",h);
-  },[breakpoint]);
-  return is;
-}
 
 // ╔══════════════════════════════════════════════════════════════════════╗
 // ║  DASHBOARD                                                          ║
