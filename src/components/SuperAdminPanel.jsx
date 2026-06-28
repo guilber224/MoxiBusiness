@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from "react";
-import { Shield, RefreshCw, MessageCircle, Check, X, Edit2 } from "lucide-react";
+import { Shield, RefreshCw, MessageCircle, Check, X, Edit2, Users, Trash2, AlertTriangle } from "lucide-react";
 import { suscripcionService } from "../services/suscripcionService.js";
 import { FONT } from "../theme.jsx";
 import toast from "react-hot-toast";
@@ -21,22 +21,27 @@ function DiasChip({ sus }) {
 
 export function SuperAdminPanel() {
   const [suscripciones, setSuscripciones] = useState([]);
+  const [usuarios, setUsuarios] = useState([]);
   const [loading, setLoading] = useState(true);
   const [whatsapp, setWhatsapp] = useState("");
   const [editingWa, setEditingWa] = useState(false);
   const [waInput, setWaInput] = useState("");
   const [extending, setExtending] = useState(null);
+  const [confirmDelete, setConfirmDelete] = useState(null); // userId a eliminar
+  const [deleting, setDeleting] = useState(false);
 
   const cargar = useCallback(async () => {
     setLoading(true);
     try {
-      const [sus, cfg] = await Promise.all([
+      const [sus, cfg, usrs] = await Promise.all([
         suscripcionService.getTodasLasSuscripciones(),
         suscripcionService.getConfig(),
+        suscripcionService.getUsuariosSistema(),
       ]);
       setSuscripciones(sus);
       setWhatsapp(cfg.whatsapp_soporte || "");
       setWaInput(cfg.whatsapp_soporte || "");
+      setUsuarios(usrs);
     } catch (e) {
       toast.error("Error al cargar: " + (e.message || e));
     } finally {
@@ -209,6 +214,71 @@ export function SuperAdminPanel() {
             )}
           </div>
         ))}
+      </div>
+
+      {/* Users list */}
+      <div style={card}>
+        <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 16 }}>
+          <Users size={16} color="#863bff" strokeWidth={2} />
+          <span style={{ fontWeight: 600, fontSize: 13 }}>Usuarios del sistema ({usuarios.length})</span>
+        </div>
+
+        {loading ? (
+          <div style={{ textAlign: "center", padding: "24px 0", color: "var(--color-text-faint)", fontSize: 13 }}>Cargando…</div>
+        ) : usuarios.length === 0 ? (
+          <div style={{ textAlign: "center", padding: "24px 0", color: "var(--color-text-faint)", fontSize: 13 }}>No hay usuarios registrados</div>
+        ) : usuarios.map(u => (
+          <div key={u.id} style={{ borderRadius: 12, border: "1px solid var(--color-border)", padding: "12px 16px", marginBottom: 8, display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, flexWrap: "wrap" }}>
+            <div style={{ minWidth: 0, flex: 1 }}>
+              <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap", marginBottom: 2 }}>
+                <span style={{ fontWeight: 600, fontSize: 13 }}>{u.nombre || "Sin nombre"}</span>
+                <span style={{ fontSize: 10, fontWeight: 700, color: u.role === "superadmin" ? "#863bff" : u.role === "admin" ? "#22C5FE" : "#64748b", background: (u.role === "superadmin" ? "#863bff" : u.role === "admin" ? "#22C5FE" : "#64748b") + "18", padding: "2px 7px", borderRadius: 5, textTransform: "uppercase" }}>
+                  {u.role}
+                </span>
+              </div>
+              <div style={{ fontSize: 11, color: "var(--color-text-faint)" }}>{u.email || "—"}</div>
+            </div>
+
+            {confirmDelete === u.id ? (
+              <div style={{ display: "flex", alignItems: "center", gap: 6, flexShrink: 0 }}>
+                <AlertTriangle size={13} color="#f59e0b" />
+                <span style={{ fontSize: 11, color: "#f59e0b", fontWeight: 600 }}>¿Eliminar?</span>
+                <button
+                  disabled={deleting}
+                  onClick={async () => {
+                    setDeleting(true);
+                    try {
+                      await suscripcionService.eliminarUsuario(u.id, u.empresa_id);
+                      toast.success("Usuario eliminado");
+                      setConfirmDelete(null);
+                      await cargar();
+                    } catch (e) {
+                      toast.error("Error: " + (e.message || e));
+                    } finally { setDeleting(false); }
+                  }}
+                  style={{ background: "#ef4444", border: "none", borderRadius: 7, padding: "5px 10px", cursor: "pointer", fontSize: 11, fontWeight: 700, color: "#fff", fontFamily: FONT, opacity: deleting ? 0.5 : 1 }}
+                >
+                  {deleting ? "…" : "Sí, eliminar"}
+                </button>
+                <button onClick={() => setConfirmDelete(null)} style={{ background: "var(--color-bg-primary)", border: "1px solid var(--color-border)", borderRadius: 7, padding: "5px 8px", cursor: "pointer", display: "flex", fontFamily: FONT }}>
+                  <X size={12} color="var(--color-text-faint)" />
+                </button>
+              </div>
+            ) : (
+              <button
+                onClick={() => setConfirmDelete(u.id)}
+                disabled={u.role === "superadmin"}
+                title={u.role === "superadmin" ? "No se puede eliminar al superadmin" : "Eliminar usuario"}
+                style={{ background: "rgba(239,68,68,0.08)", border: "1px solid rgba(239,68,68,0.2)", borderRadius: 8, padding: "6px 10px", cursor: u.role === "superadmin" ? "not-allowed" : "pointer", display: "flex", alignItems: "center", gap: 5, fontSize: 11, color: u.role === "superadmin" ? "var(--color-text-faint)" : "#ef4444", fontFamily: FONT, opacity: u.role === "superadmin" ? 0.3 : 1 }}
+              >
+                <Trash2 size={12} strokeWidth={2} /> Eliminar
+              </button>
+            )}
+          </div>
+        ))}
+        <p style={{ margin: "10px 0 0", fontSize: 11, color: "var(--color-text-faint)" }}>
+          Al eliminar un usuario se borra su perfil y suscripción. Para borrar su cuenta de Supabase Auth ve a Dashboard → Authentication → Users.
+        </p>
       </div>
 
       <style>{`@keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }`}</style>

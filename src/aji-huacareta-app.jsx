@@ -456,7 +456,7 @@ const init = async () => {
   if(recoveryMode) return <ResetPasswordScreen onDone={() => setRecoveryMode(false)} />;
   // isRestoringSession: hay sesión activa pero el perfil aún se está cargando — no mostrar AuthScreen
   if(!user && isRestoringSession) return loadingScreen;
-  if(!user) return <AuthScreen users={data.users} config={data.config} onLogin={loginUser} saveUsers={value=>save("users", value)} saveConfig={value=>save("config", value)}/>;
+  if(!user) return <AuthScreen config={data.config} onLogin={loginUser} saveConfig={value=>save("config", value)}/>;
   // Usuario Supabase sin empresa_id: bloquear acceso total al ERP.
   // No renderizar dashboard, ventas, clientes ni ningún módulo.
   if(isSupabaseUser(user) && !user.empresa_id) return <OnboardingIncompleteScreen onRetry={handleRetryOnboarding} onLogout={handleLogout}/>;

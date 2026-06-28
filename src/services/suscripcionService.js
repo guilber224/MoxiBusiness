@@ -81,4 +81,21 @@ export const suscripcionService = {
       .eq("id", 1);
     if (error) throw error;
   },
+
+  async getUsuariosSistema() {
+    const { data, error } = await supabase
+      .from("usuarios")
+      .select("id, nombre, email, role, empresa_id, created_at")
+      .order("created_at", { ascending: false });
+    if (error) throw error;
+    return data || [];
+  },
+
+  async eliminarUsuario(userId, empresaId) {
+    if (empresaId) {
+      await supabase.from("suscripciones").delete().eq("empresa_id", empresaId);
+    }
+    const { error } = await supabase.from("usuarios").delete().eq("id", userId);
+    if (error) throw error;
+  },
 };
