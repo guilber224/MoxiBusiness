@@ -40,6 +40,7 @@ import { Productos } from "./components/Productos.jsx";
 import { Inventario } from "./components/Inventario.jsx";
 import { DashboardPremium } from "./components/DashboardPremium.jsx";
 import { Ventas } from "./components/Ventas.jsx";
+import { Pedidos } from "./components/Pedidos.jsx";
 import { BRAND_NAME, BRAND_SUBTITLE, C, R, FONT, SECTORS_COLORS, ThemeProvider, useTheme, safeBusinessName } from "./theme.jsx";
 import { card, lbl, inp, row, mkBtn, mkBadge } from "./styles.js";
 import { useIsMobile } from "./hooks/useIsMobile.js";
