@@ -1,8 +1,6 @@
-﻿import { useState, useEffect, useRef, useMemo, useCallback, createContext, useContext } from "react";
-import { AreaChart, Area, BarChart, Bar, LineChart, Line, PieChart, Pie, Cell, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Legend } from "recharts";
-import { supabase, createClient as _createSupabaseClient, SUPABASE_URL as _SUPABASE_URL, SUPABASE_ANON_KEY as _SUPABASE_ANON_KEY } from './lib/supabaseClient';
+﻿import { useState, useEffect, useRef, useMemo, useCallback } from "react";
+import { supabase } from './lib/supabaseClient';
 import { ventasService } from "./services/ventasService.js";
-import { authService } from "./services/authService.js";
 import { userService } from "./services/userService.js";
 import { productosService } from "./services/productosService.js";
 import { clientesService } from "./services/clientesService.js";
@@ -10,31 +8,17 @@ import { inventarioService } from "./services/inventarioService.js";
 import { gastosService } from "./services/gastosService.js";
 import { movimientosService } from "./services/movimientosService.js";
 import { pedidosService } from "./services/pedidosService.js";
-import { analyticsService } from "./services/analyticsService.js";
-import { getScopedStorageKey, getLastEmpresaId, saveLastEmpresaId, migrateLegacyStorageIfNeeded, isSupabaseUUID } from "./utils/storageScope.js";
-import {
-  n, uid, pct, today, fDate, fShort, fDateTime, isAdmin, isSupabaseUser,
-  VALID_ROLES, normalizeRole, normalizeSaleItem, normalizeSales, normalizeUsers, normalizeCustomers,
-  mergeById, getPeriodStart, isWithinPeriod, filterByPeriod, getSalePayments, buildCashChart,
-  restoreInventoryFromSale, reverseProductionInventory, buildChart,
-} from "./utils/businessLogic.js";
-import {
-  LayoutDashboard, Users, ShoppingCart, CreditCard, Package, Archive,
-  Factory, Truck, Wallet, BarChart2, Download, Shield, LogOut, Menu,
-  ChevronLeft, ChevronRight, Bell, Settings, Search, Sun, Moon, X,
-  TrendingUp, TrendingDown, AlertTriangle, CheckCircle, Home, MoreHorizontal,
-  Banknote, Building2, QrCode, Printer, ScanLine, Upload, ImageIcon, Camera,
-  ClipboardList, FileText, Plus, Trash2, Copy, ArrowRight,
-} from "lucide-react";
-import { motion, AnimatePresence } from "framer-motion";
-import toast, { Toaster } from "react-hot-toast";
-import { CURRENCIES, getCurrencySymbol, applyCurrencyCode, resetCurrency, formatCurrency, Bs } from "./currency.js";
-import { getCurrentEmpresaId, setCurrentEmpresaId, isSupabaseScope, generateId } from "./empresaScope.js";
-import { xlsx } from "./utils/xlsxExport.js";
-import {
-  DEFAULT_CATEGORY_ID, CATEGORY_NAME_FALLBACKS, DEFAULT_CATEGORIES,
-  slugifyId, prettifyCategoryId, buildCategoryMap, getCategoryName, ensureCategories, sanitizeProducts,
-} from "./categories.js";
+import { saveLastEmpresaId, migrateLegacyStorageIfNeeded } from "./utils/storageScope.js";
+import { isSupabaseUser, normalizeSales, normalizeCustomers, normalizeUsers, mergeById } from "./utils/businessLogic.js";
+import { Toaster } from "react-hot-toast";
+import { applyCurrencyCode, resetCurrency } from "./currency.js";
+import { getCurrentEmpresaId, setCurrentEmpresaId } from "./empresaScope.js";
+import { DEFAULT_CATEGORY_ID, DEFAULT_CATEGORIES, ensureCategories, sanitizeProducts } from "./categories.js";
+import { BRAND_NAME, ThemeProvider, FONT, safeBusinessName } from "./theme.jsx";
+import { useIsMobile } from "./hooks/useIsMobile.js";
+import { BrandLogo } from "./components/ui/BrandLogo.jsx";
+import { BottomNav } from "./components/BottomNav.jsx";
+import { NAV_GROUPS, ROLES } from "./navConfig.js";
 import { Clientes } from "./components/Clientes.jsx";
 import { Productos } from "./components/Productos.jsx";
 import { Inventario } from "./components/Inventario.jsx";
@@ -48,25 +32,10 @@ import { GastosPage } from "./components/GastosPage.jsx";
 import { Caja } from "./components/Caja.jsx";
 import { Analisis } from "./components/Analisis.jsx";
 import { Exportar } from "./components/Exportar.jsx";
-import { BRAND_NAME, BRAND_SUBTITLE, C, R, FONT, SECTORS_COLORS, ThemeProvider, useTheme, safeBusinessName } from "./theme.jsx";
-import { card, lbl, inp, row, mkBtn, mkBadge } from "./styles.js";
-import { useIsMobile } from "./hooks/useIsMobile.js";
-import { Modal } from "./components/ui/Modal.jsx";
-import { Empty } from "./components/ui/Empty.jsx";
-import { Header } from "./components/ui/Header.jsx";
-import { Chip } from "./components/ui/Chip.jsx";
-import { KPI } from "./components/ui/KPI.jsx";
-import { Table } from "./components/ui/Table.jsx";
-import { SearchInput } from "./components/ui/SearchInput.jsx";
-import { BrandLogo } from "./components/ui/BrandLogo.jsx";
-import { BottomNav } from "./components/BottomNav.jsx";
-import { NAV_GROUPS, ROLE_OPTIONS, ROLES } from "./navConfig.js";
 import { AuthScreen } from "./screens/AuthScreen.jsx";
 import { ResetPasswordScreen } from "./screens/ResetPasswordScreen.jsx";
 import { OnboardingIncompleteScreen } from "./screens/OnboardingIncompleteScreen.jsx";
 import { Sidebar } from "./components/Sidebar.jsx";
-import { LogoUploader } from "./components/LogoUploader.jsx";
-import { QrUploader } from "./components/QrUploader.jsx";
 import { UsuariosAdmin } from "./components/UsuariosAdmin.jsx";
 import { Topbar } from "./components/Topbar.jsx";
 import { loadStoredValue, persistValue, buildActivityEntry, DEFAULT_CONFIG, DEFAULT_ACTIVITY_LOGS } from "./utils/appStorage.js";
