@@ -37,6 +37,9 @@ export const FONT = "'Inter', 'SF Pro Display', -apple-system, sans-serif";
 // Spacing / radius
 export const R = { sm: 6, md: 8, lg: 12, xl: 16 };
 
+// Paleta para gráficos de sectores (pie/donut) — orden fijo de colores por índice.
+export const SECTORS_COLORS = [C.brandLight, C.green, C.warning, C.danger, "#7C3AED", "#0891B2"];
+
 // ── Theme context ──────────────────────────────────────────────────────────
 const ThemeCtx = createContext({ isDark: false, toggle: () => {} });
 export const useTheme = () => useContext(ThemeCtx);

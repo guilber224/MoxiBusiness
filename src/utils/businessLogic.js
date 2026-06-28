@@ -3,6 +3,15 @@
 
 export const uid = () => Math.random().toString(36).slice(2, 9);
 export const n = v => parseFloat(v) || 0;
+export const PERIOD_OPTIONS = [
+  ["today", "Hoy"],
+  ["week", "Semana"],
+  ["month", "Mes"],
+  ["3m", "3 Meses"],
+  ["6m", "6 Meses"],
+  ["year", "Año"],
+  ["5y", "5 Años"],
+];
 export const pct = (a, b) => b === 0 ? 0 : Math.round((a / b) * 100);
 export const today = () => new Date().toISOString().slice(0, 10);
 export const fDate = d => { try { return new Date(d).toLocaleDateString("es-BO", { day: "2-digit", month: "2-digit", year: "numeric" }); } catch { return "—"; } };
@@ -225,3 +234,37 @@ export const reverseProductionInventory = (inventory, order) =>
     if (item.productId === order?.outputId) return { ...item, stock: Math.max(0, item.stock - n(order.outputProduced)) };
     return item;
   });
+
+// ╔══════════════════════════════════════════════════════════════════════╗
+// ║  CHART DATA GENERATOR (Dashboard)                                   ║
+// ╚══════════════════════════════════════════════════════════════════════╝
+export function buildChart(sales, period) {
+  const now = new Date();
+  const sameDay = (a,b) => new Date(a).toDateString()===new Date(b).toDateString();
+  let pts = [];
+  if(period==="today"){
+    pts = Array.from({length:24},(_,i)=>({date:`${i}h`,ventas:0,cobrado:0,deuda:0,_h:i}));
+    sales.forEach(s=>{ const d=new Date(s.date); if(sameDay(d,now)){const p=pts[d.getHours()];if(p){p.ventas+=s.total;p.cobrado+=s.paid;p.deuda+=s.debt;}} });
+  }else if(period==="week"){
+    pts = Array.from({length:7},(_,i)=>{ const d=new Date(now-(6-i)*86400000); return{date:fShort(d),ventas:0,cobrado:0,deuda:0,_d:d}; });
+    sales.forEach(s=>{ const p=pts.find(pt=>sameDay(pt._d,s.date)); if(p){p.ventas+=s.total;p.cobrado+=s.paid;p.deuda+=s.debt;} });
+  }else if(period==="month"){
+    const dim=new Date(now.getFullYear(),now.getMonth()+1,0).getDate();
+    pts = Array.from({length:dim},(_,i)=>{ const d=new Date(now.getFullYear(),now.getMonth(),i+1); return{date:`${i+1}`,ventas:0,cobrado:0,deuda:0,_d:d}; });
+    sales.forEach(s=>{ const p=pts.find(pt=>sameDay(pt._d,s.date)); if(p){p.ventas+=s.total;p.cobrado+=s.paid;p.deuda+=s.debt;} });
+  }else if(period==="3m"){
+    pts = Array.from({length:13},(_,i)=>{ const d=new Date(now-(12-i)*7*86400000); return{date:fShort(d),ventas:0,cobrado:0,deuda:0,_s:new Date(d-7*86400000),_e:d}; });
+    sales.forEach(s=>{ const sd=new Date(s.date); const p=pts.find(pt=>sd>=pt._s&&sd<=pt._e); if(p){p.ventas+=s.total;p.cobrado+=s.paid;p.deuda+=s.debt;} });
+  }else if(period==="6m"){
+    pts = Array.from({length:6},(_,i)=>{ const mn=(now.getMonth()-(5-i)+12)%12; const yr=now.getFullYear()-(now.getMonth()<(5-i)?1:0); return{date:new Date(yr,mn).toLocaleDateString("es-BO",{month:"short"}),ventas:0,cobrado:0,deuda:0,_m:mn,_y:yr}; });
+    sales.forEach(s=>{ const d=new Date(s.date); const p=pts.find(pt=>d.getMonth()===pt._m&&d.getFullYear()===pt._y); if(p){p.ventas+=s.total;p.cobrado+=s.paid;p.deuda+=s.debt;} });
+  }else if(period==="year"){
+    const M=["Ene","Feb","Mar","Abr","May","Jun","Jul","Ago","Sep","Oct","Nov","Dic"];
+    pts=M.map((m,i)=>({date:m,ventas:0,cobrado:0,deuda:0,_m:i}));
+    sales.forEach(s=>{ const d=new Date(s.date); if(d.getFullYear()===now.getFullYear()){const p=pts[d.getMonth()];if(p){p.ventas+=s.total;p.cobrado+=s.paid;p.deuda+=s.debt;}} });
+  }else{
+    pts=Array.from({length:5},(_,i)=>{ const yr=now.getFullYear()-(4-i); return{date:`${yr}`,ventas:0,cobrado:0,deuda:0,_y:yr}; });
+    sales.forEach(s=>{ const yr=new Date(s.date).getFullYear(); const p=pts.find(pt=>pt._y===yr); if(p){p.ventas+=s.total;p.cobrado+=s.paid;p.deuda+=s.debt;} });
+  }
+  return pts.map(({date,ventas,cobrado,deuda})=>({date,ventas:Math.round(ventas*100)/100,cobrado:Math.round(cobrado*100)/100,deuda:Math.round(deuda*100)/100}));
+}
