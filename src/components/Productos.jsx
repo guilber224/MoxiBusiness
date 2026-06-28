@@ -20,7 +20,7 @@ export function Productos({ D, save, user }) {
   const { products, categories } = D;
   const categoryOptions = categories.length ? categories : DEFAULT_CATEGORIES;
   const firstCategoryId = categoryOptions.find(category => category.id !== DEFAULT_CATEGORY_ID)?.id || DEFAULT_CATEGORY_ID;
-  const emptyForm = { name: "", cat: firstCategoryId, unit: "bolsa", price: "", minStock: "", desc: "", img: null };
+  const emptyForm = { name: "", cat: firstCategoryId, unit: "bolsa", price: "", cost: "", minStock: "", desc: "", img: null };
   const [q,setQ]=useState("");
   const [cat,setCat]=useState("all");
   const [modal,setModal]=useState(null);
@@ -37,27 +37,25 @@ export function Productos({ D, save, user }) {
     setForm(product ? { ...product } : { ...emptyForm, cat: firstCategoryId });
     setModal(product||"new");
   };
-  // POS rapido: agrega tarjetas e imagenes sin alterar la logica base del carrito y la venta.
   const doSave = async () => {
     if (!form.name.trim()) return;
     setProdErr("");
-    const nextProduct = { ...form, price:n(form.price), minStock:n(form.minStock), cat:form.cat||DEFAULT_CATEGORY_ID };
+    const nextProduct = { ...form, price:n(form.price), cost:n(form.cost)||0, minStock:n(form.minStock), cat:form.cat||DEFAULT_CATEGORY_ID };
     if (modal === "new") {
       const producto = { ...nextProduct, id: generateId(), empresa_id: user?.empresa_id };
       const saved = await productosService.upsertProducto(producto);
-      if (saved?._localOnly && isSupabaseUUID(user?.empresa_id)) {
-        setProdErr("⚠ Error al guardar en Supabase. Revisa la consola (F12).");
-        return;
-      }
+      // Siempre guardar localmente — si Supabase falla el usuario no pierde su producto
       save("products", [...products, { ...nextProduct, id: producto.id }]);
+      if (saved?._localOnly && isSupabaseUUID(user?.empresa_id)) {
+        toast.error("Producto guardado localmente. Para sincronizar con Supabase ejecuta supabase_nuevas_columnas.sql");
+      }
     } else {
       const producto = { ...products.find(p => p.id === modal.id), ...nextProduct, empresa_id: user?.empresa_id };
-      const saved = await productosService.upsertProducto(producto).catch(e => { console.error("[Productos] update:", e.message); return null; });
-      if (saved?._localOnly && isSupabaseUUID(user?.empresa_id)) {
-        setProdErr("⚠ Error al actualizar en Supabase. No se guardó — revisa tu conexión e intenta de nuevo.");
-        return;
-      }
+      const saved = await productosService.upsertProducto(producto);
       save("products", products.map(p => p.id === modal.id ? { ...p, ...nextProduct } : p));
+      if (saved?._localOnly && isSupabaseUUID(user?.empresa_id)) {
+        toast.error("Edición guardada localmente. No se pudo sincronizar con Supabase.");
+      }
     }
     setModal(null);
   };
@@ -145,6 +143,7 @@ export function Productos({ D, save, user }) {
                 <div style={{fontSize:11,color:C.textFaint,marginBottom:2}}>{getCategoryName(categoryOptions, product.cat)}</div>
                 <div style={{fontWeight:700,fontSize:13,marginBottom:6,lineHeight:1.3}}>{product.name}</div>
                 <div style={{fontSize:16,fontWeight:800,color:C.red,letterSpacing:"-0.03em"}}>{Bs(product.price)}<span style={{fontSize:10,fontWeight:400,color:C.textFaint}}>/{product.unit}</span></div>
+                {product.cost>0&&<div style={{fontSize:11,color:C.green,marginTop:1,fontWeight:600}}>Ganancia: {product.price>0?Math.round((product.price-product.cost)/product.price*100):0}%</div>}
                 {product.minStock>0&&<div style={{fontSize:11,color:C.textFaint,marginTop:2}}>Mín: {product.minStock} {product.unit}</div>}
                 <div style={{display:"flex",gap:4,marginTop:8}}>
                   <button onClick={()=>openForm(product)} style={{...mkBtn("ghost"),padding:"4px 8px",flex:1,justifyContent:"center",fontSize:11}}>✏️</button>
@@ -164,10 +163,12 @@ export function Productos({ D, save, user }) {
           </div>
         </div>
         <div style={row()}>
-          <div style={{flex:1}}><label style={lbl}>Precio (Bs.)</label><input type="number" style={inp} value={form.price} onChange={e=>setForm({...form,price:e.target.value})} placeholder="0.00"/></div>
+          <div style={{flex:1}}><label style={lbl}>Precio venta (Bs.)</label><input type="number" style={inp} value={form.price} onChange={e=>setForm({...form,price:e.target.value})} placeholder="0.00"/></div>
+          <div style={{flex:1}}><label style={lbl}>Costo (Bs.)</label><input type="number" style={inp} value={form.cost} onChange={e=>setForm({...form,cost:e.target.value})} placeholder="0.00"/></div>
           <div style={{flex:1}}><label style={lbl}>Unidad</label><input style={inp} value={form.unit} onChange={e=>setForm({...form,unit:e.target.value})} placeholder="bolsa, kg..."/></div>
           <div style={{flex:1}}><label style={lbl}>Stock mínimo</label><input type="number" style={inp} value={form.minStock} onChange={e=>setForm({...form,minStock:e.target.value})} placeholder="0"/></div>
         </div>
+        {n(form.price)>0&&n(form.cost)>0&&<div style={{fontSize:12,color:C.green,fontWeight:600,marginTop:-6,marginBottom:4}}>Margen: {Math.round((n(form.price)-n(form.cost))/n(form.price)*100)}% · Ganancia: {Bs(n(form.price)-n(form.cost))}/unidad</div>}
         <div style={{marginBottom:10}}><label style={lbl}>Descripción</label><input style={inp} value={form.desc} onChange={e=>setForm({...form,desc:e.target.value})} placeholder="Descripción opcional"/></div>
         <div style={{marginBottom:18}}>
           <label style={lbl}>Imagen del producto</label>

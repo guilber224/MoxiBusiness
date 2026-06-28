@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from "react";
-import { Shield, RefreshCw, MessageCircle, Check, X, Edit2, Users, Trash2, AlertTriangle, CreditCard } from "lucide-react";
+import { Shield, RefreshCw, MessageCircle, Check, X, Edit2, Users, Trash2, AlertTriangle, CreditCard, Clock } from "lucide-react";
 import { suscripcionService } from "../services/suscripcionService.js";
 import { FONT } from "../theme.jsx";
 import toast from "react-hot-toast";
@@ -26,6 +26,10 @@ export function SuperAdminPanel() {
   const [whatsapp, setWhatsapp] = useState("");
   const [editingWa, setEditingWa] = useState(false);
   const [waInput, setWaInput] = useState("");
+  const [trialDias, setTrialDias] = useState(7);
+  const [editingTrial, setEditingTrial] = useState(false);
+  const [trialInput, setTrialInput] = useState("7");
+  const [savingTrial, setSavingTrial] = useState(false);
   const [extending, setExtending] = useState(null);
   const [confirmDelete, setConfirmDelete] = useState(null);
   const [deleting, setDeleting] = useState(false);
@@ -45,6 +49,9 @@ export function SuperAdminPanel() {
       setSuscripciones(sus);
       setWhatsapp(cfg.whatsapp_soporte || "");
       setWaInput(cfg.whatsapp_soporte || "");
+      const td = cfg.trial_dias ?? 7;
+      setTrialDias(td);
+      setTrialInput(String(td));
       setUsuarios(usrs);
       setPagos(pgs);
     } catch (e) {
@@ -65,6 +72,20 @@ export function SuperAdminPanel() {
     } catch (e) {
       toast.error("Error: " + (e.message || e));
     }
+  };
+
+  const guardarTrialDias = async () => {
+    const dias = trialInput === "-1" ? -1 : parseInt(trialInput, 10);
+    if (isNaN(dias)) return toast.error("Número inválido");
+    setSavingTrial(true);
+    try {
+      await suscripcionService.updateTrialDias(dias);
+      setTrialDias(dias);
+      setEditingTrial(false);
+      toast.success(dias < 0 ? "Trial ilimitado configurado" : `Trial configurado en ${dias} días`);
+    } catch (e) {
+      toast.error("Error: " + (e.message || e));
+    } finally { setSavingTrial(false); }
   };
 
   const extender = async (empresa_id, dias, plan) => {
@@ -144,6 +165,52 @@ export function SuperAdminPanel() {
         )}
         <p style={{ margin: "10px 0 0", fontSize: 11, color: "var(--color-text-faint)" }}>
           Este número aparece en la pantalla de suscripción vencida de todos los clientes.
+        </p>
+      </div>
+
+      {/* Trial period config */}
+      <div style={card}>
+        <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 12 }}>
+          <Clock size={16} color="#f59e0b" strokeWidth={2} />
+          <span style={{ fontWeight: 600, fontSize: 13 }}>Período de prueba (trial)</span>
+        </div>
+        {editingTrial ? (
+          <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+            <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+              {[["7", "7 días"], ["14", "14 días"], ["30", "30 días"], ["90", "90 días"], ["-1", "Ilimitado"]].map(([v, l]) => (
+                <button key={v} onClick={() => setTrialInput(v)}
+                  style={{ padding: "6px 12px", borderRadius: 7, fontSize: 12, fontWeight: 600, cursor: "pointer", fontFamily: FONT,
+                    background: trialInput === v ? "#f59e0b" : "var(--color-bg-primary)",
+                    color: trialInput === v ? "#fff" : "var(--color-text-mid)",
+                    border: `1px solid ${trialInput === v ? "#f59e0b" : "var(--color-border)"}` }}>
+                  {l}
+                </button>
+              ))}
+            </div>
+            <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+              <input value={trialInput} onChange={e => setTrialInput(e.target.value)} placeholder="Días (−1 = ilimitado)"
+                style={{ width: 160, background: "var(--color-bg-primary)", border: "1px solid var(--color-brand)", borderRadius: 8, padding: "8px 12px", fontSize: 13, color: "var(--color-text)", fontFamily: FONT, outline: "none" }} />
+              <button onClick={guardarTrialDias} disabled={savingTrial}
+                style={{ background: "#f59e0b", border: "none", borderRadius: 8, padding: "8px 14px", cursor: "pointer", color: "#fff", display: "flex", alignItems: "center", gap: 6, fontSize: 12, fontFamily: FONT, fontWeight: 600, opacity: savingTrial ? 0.5 : 1 }}>
+                <Check size={13} /> {savingTrial ? "…" : "Guardar"}
+              </button>
+              <button onClick={() => { setEditingTrial(false); setTrialInput(String(trialDias)); }}
+                style={{ background: "var(--color-bg-primary)", border: "1px solid var(--color-border)", borderRadius: 8, padding: "8px 10px", cursor: "pointer", display: "flex", fontFamily: FONT }}>
+                <X size={13} color="var(--color-text-faint)" />
+              </button>
+            </div>
+          </div>
+        ) : (
+          <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+            <span style={{ fontSize: 15, fontWeight: 600, color: "#f59e0b" }}>{trialDias < 0 ? "Ilimitado" : `${trialDias} días`}</span>
+            <button onClick={() => setEditingTrial(true)}
+              style={{ background: "none", border: "1px solid var(--color-border)", borderRadius: 8, padding: "5px 10px", cursor: "pointer", display: "flex", alignItems: "center", gap: 5, fontSize: 11, color: "var(--color-text-mid)", fontFamily: FONT }}>
+              <Edit2 size={11} /> Editar
+            </button>
+          </div>
+        )}
+        <p style={{ margin: "10px 0 0", fontSize: 11, color: "var(--color-text-faint)" }}>
+          Duración del período de prueba para nuevas empresas al registrarse. −1 = sin límite de tiempo.
         </p>
       </div>
 

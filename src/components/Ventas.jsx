@@ -428,7 +428,7 @@ function BarcodeScannerButton({ onScan }) {
 // ╔══════════════════════════════════════════════════════════════════════╗
 // ║  VENTAS                                                             ║
 // ╚══════════════════════════════════════════════════════════════════════╝
-export function Ventas({ D, save, user, config, logAction, onRefreshDashboard }) {
+export function Ventas({ D, save, user, config, logAction, onRefreshDashboard, onReloadSales, salesLoading }) {
   const { sales, customers, products, inventory, categories } = D;
   const isMobile = useIsMobile();
   const [filter, setFilter] = useState("all"); const [q, setQ] = useState(""); const [modal, setModal] = useState(null); const [detail, setDetail] = useState(null);
@@ -574,6 +574,16 @@ export function Ventas({ D, save, user, config, logAction, onRefreshDashboard })
   const filtered = sales.filter(s => { const mq = `${s.customerName} ${s.customerMarket}`.toLowerCase().includes(q.toLowerCase()); const mf = filter === "all" || (filter === "pending" && s.debt > 0) || (filter === "paid" && s.debt === 0); return mq && mf; }).sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
   const posProducts = products.filter(product => (posCategory === "all" || product.cat === posCategory) && `${product.name} ${getCategoryName(categoryOptions, product.cat)}`.toLowerCase().includes(posSearch.toLowerCase()));
 
+  const calcSaleProfit = (sale) =>
+    (sale.items || []).reduce((acc, item) => {
+      const product = products.find(p => p.id === item.productId);
+      return acc + (n(item.unitPrice) - n(product?.cost || 0)) * n(item.qty);
+    }, 0);
+  const hasCostData = products.some(p => n(p.cost) > 0);
+  const totalRevenue = sales.reduce((s, v) => s + v.total, 0);
+  const totalProfit = hasCostData ? sales.reduce((s, v) => s + calcSaleProfit(v), 0) : 0;
+  const avgMargin = totalRevenue > 0 && hasCostData ? Math.round(totalProfit / totalRevenue * 100) : null;
+
   // ── Detalle de venta ──────────────────────────────────────────────────────
   if (detail) {
     const sale = sales.find(s => s.id === detail.id) || detail;
@@ -595,11 +605,18 @@ export function Ventas({ D, save, user, config, logAction, onRefreshDashboard })
             </div>
           </div>
           <Table cols={[{ key: "name", label: "Producto" }, { key: "qty", label: "Cant.", render: (v, row) => `${v} ${row.unit}` }, { key: "unitPrice", label: "Precio unit.", render: v => Bs(v) }, { key: "sub", label: "Subtotal", render: v => <strong>{Bs(v)}</strong> }]} rows={sale.items} />
-          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 8, padding: "12px", background: C.bg, borderRadius: R.md, marginTop: 12, marginBottom: 12 }}>
-            {[["Total", Bs(sale.total), C.red], ["Pagado", Bs(sale.paid), C.green], ["Deuda", Bs(sale.debt), sale.debt > 0 ? C.amber : C.green]].map(([l, v, c]) => (
-              <div key={l}><div style={{ ...lbl }}>{l}</div><div style={{ fontWeight: 700, color: c, fontSize: 15 }}>{v}</div></div>
-            ))}
-          </div>
+          {(() => {
+            const profit = calcSaleProfit(sale);
+            const margin = sale.total > 0 && hasCostData ? Math.round(profit / sale.total * 100) : null;
+            const cols = margin !== null ? [["Total", Bs(sale.total), C.red], ["Pagado", Bs(sale.paid), C.green], ["Deuda", Bs(sale.debt), sale.debt > 0 ? C.amber : C.green], ["Ganancia", Bs(profit) + (margin !== null ? ` (${margin}%)` : ""), C.green]] : [["Total", Bs(sale.total), C.red], ["Pagado", Bs(sale.paid), C.green], ["Deuda", Bs(sale.debt), sale.debt > 0 ? C.amber : C.green]];
+            return (
+              <div style={{ display: "grid", gridTemplateColumns: `repeat(${cols.length},1fr)`, gap: 8, padding: "12px", background: C.bg, borderRadius: R.md, marginTop: 12, marginBottom: 12 }}>
+                {cols.map(([l, v, c]) => (
+                  <div key={l}><div style={{ ...lbl }}>{l}</div><div style={{ fontWeight: 700, color: c, fontSize: 14 }}>{v}</div></div>
+                ))}
+              </div>
+            );
+          })()}
           {sale.notes && <div style={{ fontSize: 13, color: C.textMid, marginBottom: 12 }}>Notas: {sale.notes}</div>}
           {sale.debt > 0 && <div style={{ borderTop: `1px solid ${C.border}`, paddingTop: 14 }}>
             <div style={{ fontWeight: 700, fontSize: 13, marginBottom: 8 }}>Registrar cobro</div>
@@ -634,11 +651,34 @@ export function Ventas({ D, save, user, config, logAction, onRefreshDashboard })
       <Header title="Ventas" sub={`${sales.length} ventas registradas`} action={<button onClick={() => setModal("new")} style={{ ...mkBtn("primary"), fontSize: 14, padding: "9px 18px" }}>+ Nueva venta</button>} />
       {feedback && <div style={{ ...card({ marginBottom: 12, borderLeft: `3px solid ${C.green}` }), color: C.green, fontWeight: 600 }}>{feedback}</div>}
       {err && <div style={{ ...card({ marginBottom: 12, borderLeft: `3px solid ${C.red}` }), color: C.red, fontWeight: 600 }}>{err}</div>}
+      {avgMargin !== null && (
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(130px,1fr))", gap: 10, marginBottom: 12 }}>
+          <div style={{ ...card(), textAlign: "center" }}>
+            <div style={{ fontSize: 11, color: C.textFaint, marginBottom: 4 }}>Ingresos totales</div>
+            <div style={{ fontSize: "clamp(14px,4vw,20px)", fontWeight: 800, color: C.red, letterSpacing: "-0.03em" }}>{Bs(totalRevenue)}</div>
+          </div>
+          <div style={{ ...card(), textAlign: "center" }}>
+            <div style={{ fontSize: 11, color: C.textFaint, marginBottom: 4 }}>Ganancia total</div>
+            <div style={{ fontSize: "clamp(14px,4vw,20px)", fontWeight: 800, color: C.green, letterSpacing: "-0.03em" }}>{Bs(totalProfit)}</div>
+          </div>
+          <div style={{ ...card(), textAlign: "center" }}>
+            <div style={{ fontSize: 11, color: C.textFaint, marginBottom: 4 }}>Margen promedio</div>
+            <div style={{ fontSize: "clamp(14px,4vw,20px)", fontWeight: 800, color: C.green, letterSpacing: "-0.03em" }}>{avgMargin}%</div>
+          </div>
+        </div>
+      )}
       <div style={{ display: "flex", gap: 8, marginBottom: 12, flexWrap: "wrap" }}>
         <SearchInput value={q} onChange={setQ} placeholder="Buscar cliente..." />
         <Chip value={filter} onChange={setFilter} options={[["all", "Todas"], ["pending", "Pendientes"], ["paid", "Saldadas"]]} />
+        {onReloadSales && <button onClick={onReloadSales} style={{ ...mkBtn("ghost"), fontSize: 12, padding: "7px 12px" }}>↺ Recargar</button>}
       </div>
-      {filtered.length === 0 ? <Empty icon="🛒" title="Sin ventas" sub={sales.length === 0 ? "Registra tu primera venta" : "Sin resultados"} action={sales.length === 0 && <button onClick={() => setModal("new")} style={mkBtn("primary")}>+ Registrar venta</button>} /> :
+      {salesLoading ? (
+        <div style={{ textAlign: "center", padding: "40px 16px", color: C.textFaint }}>
+          <div style={{ fontSize: 28, marginBottom: 8 }}>⏳</div>
+          <div style={{ fontSize: 13, fontWeight: 500 }}>Cargando ventas desde Supabase…</div>
+          <div style={{ fontSize: 11, marginTop: 4, color: C.textFaint }}>Esto puede tomar algunos segundos</div>
+        </div>
+      ) : filtered.length === 0 ? <Empty icon="🛒" title="Sin ventas" sub={sales.length === 0 ? "Registra tu primera venta" : "Sin resultados"} action={<div style={{ display: "flex", gap: 8, flexWrap: "wrap", justifyContent: "center" }}>{sales.length === 0 && onReloadSales && <button onClick={onReloadSales} style={mkBtn("ghost")}>↺ Recargar ventas</button>}<button onClick={() => setModal("new")} style={mkBtn("primary")}>+ Registrar venta</button></div>} /> :
         filtered.map(s => (
           <div key={s.id || s.numero} onClick={() => setDetail(s)} style={{ ...card(), cursor: "pointer", marginBottom: 8, display: "flex", justifyContent: "space-between", alignItems: "center", gap: 10 }} onMouseEnter={e => e.currentTarget.style.borderColor = C.borderMid} onMouseLeave={e => e.currentTarget.style.borderColor = C.border}>
             <div style={{ minWidth: 0 }}>

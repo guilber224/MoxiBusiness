@@ -8,19 +8,28 @@ const setLocal = (v, empresaId) => localStorage.setItem(_key(empresaId), JSON.st
 
 export const ventasService = {
   async getVentas(empresaId) {
-    try {
-      if (!empresaId) throw new Error("empresaId requerido");
-      const { data, error } = await supabase
+    if (!empresaId) return null;
+    // Usar columnas explícitas — evita problemas con select("*") cuando hay
+    // columnas duplicadas (ej: paymentMethod + payment_method) o tipos no soportados
+    const COLS = "id,empresa_id,customerId,customerName,customerMarket,date,items,subtotal,discount,discountType,total,paid,debt,notes,paymentMethod,payments,createdAt,usuario_id,numero";
+    const { data, error } = await supabase
+      .from("ventas")
+      .select(COLS)
+      .eq("empresa_id", empresaId);
+    if (error) {
+      console.warn("[getVentas] explicit cols failed:", error.code, error.message);
+      // Último recurso: select mínimo para al menos mostrar las ventas
+      const { data: d2, error: e2 } = await supabase
         .from("ventas")
-        .select("*")
+        .select("id,empresa_id,customerId,customerName,date,items,total,paid,debt,paymentMethod,createdAt")
         .eq("empresa_id", empresaId);
-      if (error) throw error;
-      return data || [];
-    } catch (e) {
-      console.warn("fallback getVentas:", e.message);
-      if (isSupabaseUUID(empresaId)) return [];
-      return getLocal(empresaId);
+      if (e2) {
+        console.warn("[getVentas] minimal cols also failed:", e2.code, e2.message);
+        return isSupabaseUUID(empresaId) ? null : getLocal(empresaId);
+      }
+      return d2 || [];
     }
+    return data || [];
   },
 
   async createVenta(venta, user) {

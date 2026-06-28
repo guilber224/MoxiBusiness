@@ -27,28 +27,37 @@ export const productosService = {
   },
 
   async upsertProducto(producto) {
+    const _upsert = async (p) => {
+      const { id, empresa_id, ...fields } = p;
+      const baseFields = { ...fields, nombre: fields.name || "" };
+      const payload = id ? { id, empresa_id, ...baseFields } : { empresa_id, ...baseFields };
+      const { data, error } = await supabase
+        .from("productos")
+        .upsert([payload], { onConflict: "id" })
+        .select();
+      if (error) throw error;
+      return normalizeProducto(data[0]);
+    };
+
     try {
       if (!producto.empresa_id) throw new Error("empresa_id requerido");
-      const { id, empresa_id, ...fields } = producto;
-      // Incluir 'nombre' para satisfacer NOT NULL si la columna existe en la tabla
-      const baseFields = { ...fields, nombre: fields.name || "" };
-      const payload = id
-        ? { id, empresa_id, ...baseFields }
-        : { empresa_id, ...baseFields };
-      const data = await withRetry(async () => {
-        const { data, error } = await supabase
-          .from("productos")
-          .upsert([payload], { onConflict: "id" })
-          .select();
-        if (error) {
-          console.error("[productosService] UPSERT error:", error.message, "| code:", error.code);
-          throw error;
-        }
-        return data;
-      });
-      return normalizeProducto(data[0]);
+      return await _upsert(producto);
     } catch (e) {
-      console.error("[productosService] upsertProducto FALLBACK:", e.message);
+      // Si la columna no existe aún (ej: cost antes de ejecutar la migración SQL),
+      // reintentar sin esa columna desconocida para no bloquear la operación.
+      if (e.code === "42703") {
+        const match = (e.message || "").match(/column "([^"]+)"/);
+        if (match) {
+          const badCol = match[1];
+          console.warn(`[productosService] columna "${badCol}" no existe en DB, reintentando sin ella`);
+          const { [badCol]: _dropped, ...sinCol } = producto;
+          try { return await _upsert(sinCol); } catch (e2) {
+            console.error("[productosService] retry sin columna también falló:", e2.message);
+          }
+        }
+      } else {
+        console.error("[productosService] UPSERT error:", e.code, e.message);
+      }
       const eid = producto.empresa_id;
       if (!isSupabaseUUID(eid)) {
         const local = getLocal(eid);

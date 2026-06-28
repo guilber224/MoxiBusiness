@@ -6,7 +6,7 @@
 -- 1. Tabla principal de suscripciones por empresa
 CREATE TABLE IF NOT EXISTS suscripciones (
   id             uuid        PRIMARY KEY DEFAULT gen_random_uuid(),
-  empresa_id     text        NOT NULL UNIQUE,
+  empresa_id     uuid        NOT NULL UNIQUE,
   nombre_empresa text        NOT NULL DEFAULT '',
   activa         boolean     NOT NULL DEFAULT true,
   plan           text        NOT NULL DEFAULT 'trial',

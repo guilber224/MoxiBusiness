@@ -94,7 +94,7 @@ export function Inventario({ D, save, user }) {
         </div>
       )}
 
-      <div style={{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:10,marginBottom:14}}>
+      <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(130px,1fr))",gap:10,marginBottom:14}}>
         <KPI label="Valor total en stock" value={Bs(totalVal)} Icon="🗃️" color={C.blue}/>
         <KPI label="Stock bajo" value={lowC} Icon="⚠️" color={C.amber}/>
         <KPI label="Agotados" value={emptyC} Icon="🚫" color={C.red}/>

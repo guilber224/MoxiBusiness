@@ -14,8 +14,20 @@ export const suscripcionService = {
     if (error) throw error;
     if (data) return data;
 
+    // Leer días de trial configurados por el superadmin (default 7)
+    let trialDias = 7;
+    try {
+      const cfg = await this.getConfig();
+      if (cfg?.trial_dias != null) trialDias = cfg.trial_dias;
+    } catch {}
+
     const vence_el = new Date();
-    vence_el.setDate(vence_el.getDate() + 30);
+    // -1 significa ilimitado: fecha muy lejana
+    if (trialDias < 0) {
+      vence_el.setFullYear(vence_el.getFullYear() + 100);
+    } else {
+      vence_el.setDate(vence_el.getDate() + trialDias);
+    }
     const { data: created, error: ce } = await supabase
       .from("suscripciones")
       .insert({ empresa_id, nombre_empresa: nombreEmpresa, plan: "trial", vence_el: vence_el.toISOString().split("T")[0], activa: true })
@@ -71,13 +83,21 @@ export const suscripcionService = {
 
   async getConfig() {
     const { data } = await supabase.from("sistema_config").select("*").eq("id", 1).maybeSingle();
-    return data || { whatsapp_soporte: "+59163506018" };
+    return data || { whatsapp_soporte: "+59163506018", trial_dias: 7 };
   },
 
   async updateWhatsapp(numero) {
     const { error } = await supabase
       .from("sistema_config")
       .update({ whatsapp_soporte: numero, updated_at: new Date().toISOString() })
+      .eq("id", 1);
+    if (error) throw error;
+  },
+
+  async updateTrialDias(dias) {
+    const { error } = await supabase
+      .from("sistema_config")
+      .update({ trial_dias: dias, updated_at: new Date().toISOString() })
       .eq("id", 1);
     if (error) throw error;
   },

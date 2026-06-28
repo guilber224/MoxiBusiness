@@ -43,7 +43,7 @@ export function Deudas({ D, save, user, logAction }) {
       <Header title="Gestión de Deudas" sub="Control de saldos pendientes" action={<>
         <button onClick={exportXLS} style={mkBtn("ghost")}>⬇️ Exportar Excel</button>
       </>} />
-      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 10, marginBottom: 16 }}>
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(130px,1fr))", gap: 10, marginBottom: 16 }}>
         <KPI label="Total por cobrar" value={Bs(totalDebt)} Icon="💳" color={C.red} />
         <KPI label="Clientes con deuda" value={debtClients.length} Icon="👥" color={C.amber} />
         <KPI label="Deuda promedio" value={Bs(debtClients.length > 0 ? totalDebt / debtClients.length : 0)} Icon="📊" color={C.textMid} />

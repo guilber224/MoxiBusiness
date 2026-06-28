@@ -33,7 +33,6 @@ import { Caja } from "./components/Caja.jsx";
 import { Analisis } from "./components/Analisis.jsx";
 import { Exportar } from "./components/Exportar.jsx";
 import { AuthScreen } from "./screens/AuthScreen.jsx";
-import { LandingPage } from "./screens/LandingPage.jsx";
 import { ResetPasswordScreen } from "./screens/ResetPasswordScreen.jsx";
 import { OnboardingIncompleteScreen } from "./screens/OnboardingIncompleteScreen.jsx";
 import { Sidebar } from "./components/Sidebar.jsx";
@@ -44,6 +43,7 @@ import { SuscripcionVencida } from "./screens/SuscripcionVencida.jsx";
 import { suscripcionService } from "./services/suscripcionService.js";
 import { loadStoredValue, persistValue, buildActivityEntry, DEFAULT_CONFIG, DEFAULT_ACTIVITY_LOGS } from "./utils/appStorage.js";
 import { syncDiff, SYNC_KEYS, createEmptyAppState } from "./utils/syncDiff.js";
+import { invalidateAnalyticsCache } from "./services/analyticsService.js";
 import { PRODUCTS0, FORMULAS0, CUSTOMERS0, DEFAULT_USERS } from "./seedData.js";
 
 export default function App() {
@@ -59,7 +59,7 @@ export default function App() {
   const [rtRefreshTrigger,setRtRefreshTrigger]=useState(0);
   const [suscripcion,setSuscripcion]=useState(null);
   const [waConfig,setWaConfig]=useState("+59163506018");
-  const [showLanding,setShowLanding]=useState(true);
+  const [salesLoading,setSalesLoading]=useState(false);
   const isMobile=useIsMobile();
 
   // Refs para acceder a user/data actuales dentro de callbacks sin stale closures
@@ -99,7 +99,6 @@ export default function App() {
     setUser(null);
     setData(createEmptyAppState());
     setSuscripcion(null);
-    setShowLanding(false);
     setTab("dashboard");
     setIsLoadingScope(false);
     setSidebarOpen(false);
@@ -145,9 +144,9 @@ export default function App() {
   }, [user?.id]); // eslint-disable-line react-hooks/exhaustive-deps
 
 const init = async () => {
-  // Fallback de seguridad: si onAuthStateChange no dispara INITIAL_SESSION en 4s,
+  // Fallback de seguridad: si onAuthStateChange no dispara INITIAL_SESSION en 1.5s,
   // desbloqueamos la app manualmente para no quedar en loading infinito.
-  await new Promise(resolve => setTimeout(resolve, 4000));
+  await new Promise(resolve => setTimeout(resolve, 1500));
   setSessionChecked(true);
 };
 
@@ -282,55 +281,59 @@ const init = async () => {
     return () => subscription.unsubscribe();
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // Después de login, cargar todas las entidades principales desde Supabase en paralelo.
-  // isLoadingScope = true bloquea el render del ERP mientras llegan los datos del nuevo scope.
-  // Garantiza cero frames con datos de empresa anterior visibles al usuario.
+  // Después de login, cargar entidades principales desde Supabase.
+  // Las ventas se cargan en BACKGROUND para no bloquear el render del ERP —
+  // son la consulta más lenta y la menos crítica para el primer render.
   useEffect(()=>{
     if (!user?.empresa_id) return;
     setIsLoadingScope(true);
-    // Limpiar arrays de negocio síncronamente — ningún frame con datos anteriores
+    setSalesLoading(true);
+    // Limpiar arrays síncronamente — ningún frame con datos de empresa anterior
     setData(d => d ? {
       ...d,
       sales: [], customers: [], products: [],
       inventory: [], expenses: [], movements: [],
     } : d);
     const eid = user.empresa_id;
+
+    // Paso 1: datos críticos en paralelo (bloquean hasta que todos terminen)
     Promise.all([
-      ventasService.getVentas(eid),
       clientesService.getClientes(eid),
       productosService.getProductos(eid),
       inventarioService.getInventario(eid),
       gastosService.getGastos(eid),
       movimientosService.getMovimientos(eid),
-      // Config viene de localStorage scoped — cargamos aquí para que re-login sin
-      // refresh de página no pierda el businessName y currency de la empresa.
       loadStoredValue("config", null),
-      // Usuarios de la empresa — para que admin vea todos los miembros del equipo
-      userService.getEmpresaUsuarios(eid),
-      // Cotizaciones y pedidos (devuelve null si la tabla aún no existe → no pisa local)
       pedidosService.getPedidos(eid),
-    ]).then(([supaVentas, supaClientes, supaProductos, supaInventario, supaGastos, supaMovimientos, scopedConfig, supaUsuarios, supaPedidos]) => {
+    ]).then(([supaClientes, supaProductos, supaInventario, supaGastos, supaMovimientos, scopedConfig, supaPedidos]) => {
       setData(d => {
         if (!d) return d;
         const cats = d.categories || DEFAULT_CATEGORIES;
         const next = { ...d };
-        if (Array.isArray(supaVentas))      next.sales      = normalizeSales(supaVentas);
         if (Array.isArray(supaClientes))    next.customers  = normalizeCustomers(supaClientes);
         if (Array.isArray(supaProductos))   next.products   = sanitizeProducts(supaProductos, cats);
         if (Array.isArray(supaInventario))  next.inventory  = supaInventario;
         if (Array.isArray(supaGastos))      next.expenses   = supaGastos;
         if (Array.isArray(supaMovimientos)) next.movements  = supaMovimientos;
-        // Pedidos: solo sobrescribir si Supabase devolvió un array (null = tabla inexistente → conservar local)
         if (Array.isArray(supaPedidos))     next.pedidos    = supaPedidos;
-        // Solo sobrescribir config si el scope tiene una guardada (no remplazar con null)
         if (scopedConfig)                   next.config     = scopedConfig;
-        // Usuarios empresa — sobrescribir solo si Supabase devuelve datos
-        if (Array.isArray(supaUsuarios) && supaUsuarios.length > 0) next.users = supaUsuarios;
         return next;
       });
-      // Sincronizar símbolo de moneda con la config del scope recién cargado
       if (scopedConfig?.currency) applyCurrencyCode(scopedConfig.currency);
-    }).catch((err) => { console.warn("[App] hydration failed:", err?.message ?? err); }).finally(() => setIsLoadingScope(false));
+    }).catch(err => { console.warn("[App] hydration failed:", err?.message ?? err); })
+    .finally(() => {
+      setIsLoadingScope(false); // UI desbloqueada aquí — ventas se cargan aparte
+
+      // Paso 2: ventas en background — no bloquean el render inicial
+      ventasService.getVentas(eid)
+        .then(supaVentas => {
+          if (Array.isArray(supaVentas)) {
+            setData(d => d ? { ...d, sales: normalizeSales(supaVentas) } : d);
+          }
+        })
+        .catch(e => { console.warn("[App] getVentas background failed:", e?.message); })
+        .finally(() => setSalesLoading(false));
+    });
   }, [user?.empresa_id]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Realtime: sincroniza ventas, productos, inventario, clientes y gastos entre pestañas/dispositivos.
@@ -427,6 +430,18 @@ const init = async () => {
     });
   },[user]);
 
+  const reloadSales = useCallback(async () => {
+    if (!user?.empresa_id) return;
+    setSalesLoading(true);
+    try {
+      const supaVentas = await ventasService.getVentas(user.empresa_id);
+      if (Array.isArray(supaVentas)) {
+        setData(d => ({ ...d, sales: normalizeSales(supaVentas) }));
+      }
+    } catch (e) { console.warn("[reloadSales]", e.message); }
+    finally { setSalesLoading(false); }
+  }, [user?.empresa_id]); // eslint-disable-line react-hooks/exhaustive-deps
+
   const allowedTabs = useMemo(() => ROLES[user?.role] || [], [user?.role]);
 
   useEffect(() => {
@@ -459,7 +474,6 @@ const init = async () => {
   if(recoveryMode) return <ResetPasswordScreen onDone={() => setRecoveryMode(false)} />;
   // isRestoringSession: hay sesión activa pero el perfil aún se está cargando — no mostrar AuthScreen
   if(!user && isRestoringSession) return loadingScreen;
-  if(!user && showLanding) return <LandingPage whatsapp={waConfig} onLogin={() => setShowLanding(false)} onRegister={() => setShowLanding(false)} />;
   if(!user) return <AuthScreen config={data.config} onLogin={loginUser} saveConfig={value=>save("config", value)}/>;
   // Usuario Supabase sin empresa_id: bloquear acceso total al ERP.
   // No renderizar dashboard, ventas, clientes ni ningún módulo.
@@ -524,7 +538,7 @@ const init = async () => {
             <div style={{ maxWidth: 1400, margin: "0 auto" }}>
               {tab === "dashboard"   && <DashboardPremium D={data} setTab={setTab} user={user} refreshTrigger={rtRefreshTrigger} />}
               {tab === "clientes"    && <Clientes D={data} save={save} user={user} />}
-              {tab === "ventas"      && <Ventas D={data} save={save} user={user} config={data.config} logAction={logAction} onRefreshDashboard={()=>setRtRefreshTrigger(t=>t+1)} />}
+              {tab === "ventas"      && <Ventas D={data} save={save} user={user} config={data.config} logAction={logAction} onRefreshDashboard={()=>{ invalidateAnalyticsCache(); setRtRefreshTrigger(t=>t+1); }} onReloadSales={reloadSales} salesLoading={salesLoading} />}
               {tab === "pedidos"     && <Pedidos D={data} save={save} user={user} config={data.config} logAction={logAction} onRefreshDashboard={()=>setRtRefreshTrigger(t=>t+1)} />}
               {tab === "deudas"      && <Deudas D={data} save={save} user={user} logAction={logAction} />}
               {tab === "productos"   && <Productos D={data} save={save} user={user} />}

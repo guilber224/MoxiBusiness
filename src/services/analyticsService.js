@@ -1,5 +1,13 @@
 import { supabase } from "../lib/supabaseClient";
 
+// Cache en memoria con TTL de 3 minutos — evita re-consultar Supabase cada vez que
+// el usuario navega al Dashboard (el componente se desmonta/monta en cada cambio de tab)
+const _cache = {};
+const TTL = 3 * 60 * 1000;
+function _get(key) { const e = _cache[key]; return e && Date.now() - e.ts < TTL ? e.data : null; }
+function _set(key, data) { _cache[key] = { data, ts: Date.now() }; }
+export function invalidateAnalyticsCache() { Object.keys(_cache).forEach(k => delete _cache[k]); }
+
 // Retorna { from, to } en ISO para un periodo dado
 function periodoRango(periodo) {
   const to = new Date();
@@ -20,6 +28,9 @@ export const analyticsService = {
 
   // KPIs principales del periodo: ventas, cobros, deudas, gastos, balance, ticket promedio
   async getKPIs(empresaId, periodo = "month") {
+    const ck = `kpis_${empresaId}_${periodo}`;
+    const cached = _get(ck);
+    if (cached) return cached;
     try {
       const { from, to } = periodoRango(periodo);
       const [
@@ -40,7 +51,7 @@ export const analyticsService = {
       const totalDeuda   = vArr.reduce((a, v) => a + (v.debt  || 0), 0);
       const totalGastos  = gArr.filter(g => g.type === "gasto").reduce((a, g) => a + (g.amount || 0), 0);
       const totalIngresos= gArr.filter(g => g.type === "ingreso").reduce((a, g) => a + (g.amount || 0), 0);
-      return {
+      const result = {
         totalVentas,
         totalCobrado,
         totalDeuda,
@@ -51,6 +62,8 @@ export const analyticsService = {
         ticketPromedio: vArr.length > 0 ? totalVentas / vArr.length : 0,
         tasaCobro: totalVentas > 0 ? (totalCobrado / totalVentas) * 100 : 0,
       };
+      _set(ck, result);
+      return result;
     } catch (e) {
       console.warn("[Analytics] getKPIs exception:", e.message);
       return null;
@@ -59,6 +72,9 @@ export const analyticsService = {
 
   // Comparativo vs periodo anterior: variación % de ventas
   async getComparativo(empresaId, periodo = "month") {
+    const ck = `comp_${empresaId}_${periodo}`;
+    const cached = _get(ck);
+    if (cached) return cached;
     try {
       const { from: f1, to: t1 } = periodoRango(periodo);
       const duracion = new Date(t1) - new Date(f1);
@@ -76,12 +92,14 @@ export const analyticsService = {
       const sum = arr => (arr || []).reduce((a, v) => a + (v.total || 0), 0);
       const actual = sum(cur);
       const anterior = sum(prev);
-      return {
+      const result = {
         actual,
         anterior,
         cambio: anterior > 0 ? ((actual - anterior) / anterior) * 100 : 0,
         trend: actual >= anterior ? "up" : "down",
       };
+      _set(ck, result);
+      return result;
     } catch (e) {
       console.warn("[Analytics] getComparativo exception:", e.message);
       return null;
@@ -112,6 +130,9 @@ export const analyticsService = {
 
   // Top productos por ingreso — calcula desde items de ventas
   async getTopProductos(empresaId, periodo = "month", limit = 10) {
+    const ck = `top_prod_${empresaId}_${periodo}_${limit}`;
+    const cached = _get(ck);
+    if (cached) return cached;
     try {
       const { from, to } = periodoRango(periodo);
       const { data, error } = await supabase
@@ -132,9 +153,9 @@ export const analyticsService = {
           mapa[it.productId].unidades  += Number(it.qty ?? 0);
         });
       });
-      return Object.values(mapa)
-        .sort((a, b) => b.ingreso - a.ingreso)
-        .slice(0, limit);
+      const result = Object.values(mapa).sort((a, b) => b.ingreso - a.ingreso).slice(0, limit);
+      _set(ck, result);
+      return result;
     } catch (e) {
       console.warn("[Analytics] getTopProductos exception:", e.message);
       return [];
@@ -143,6 +164,9 @@ export const analyticsService = {
 
   // Top clientes por volumen de compras
   async getTopClientes(empresaId, periodo = "month", limit = 10) {
+    const ck = `top_clts_${empresaId}_${periodo}_${limit}`;
+    const cached = _get(ck);
+    if (cached) return cached;
     try {
       const { from, to } = periodoRango(periodo);
       const { data, error } = await supabase
@@ -163,9 +187,9 @@ export const analyticsService = {
         mapa[id].compras += 1;
         mapa[id].deuda   += Number(v.debt  ?? 0);
       });
-      return Object.values(mapa)
-        .sort((a, b) => b.total - a.total)
-        .slice(0, limit);
+      const result = Object.values(mapa).sort((a, b) => b.total - a.total).slice(0, limit);
+      _set(ck, result);
+      return result;
     } catch (e) {
       console.warn("[Analytics] getTopClientes exception:", e.message);
       return [];

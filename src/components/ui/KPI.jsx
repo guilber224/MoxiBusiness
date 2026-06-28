@@ -7,7 +7,7 @@ export function KPI({ label, value, sub, color = "var(--color-text)", Icon }) {
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
         <div style={{ flex: 1, minWidth: 0 }}>
           <div style={{ ...lbl, marginBottom: 6 }}>{label}</div>
-          <div style={{ fontSize: 22, fontWeight: 700, letterSpacing: "-0.04em", color, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{value}</div>
+          <div style={{ fontSize: "clamp(14px, 4vw, 22px)", fontWeight: 700, letterSpacing: "-0.04em", color, lineHeight: 1.2, overflowWrap: "break-word", wordBreak: "break-word" }}>{value}</div>
           {sub && <div style={{ fontSize: 12, color: "var(--color-text-faint)", marginTop: 3 }}>{sub}</div>}
         </div>
         {Icon && (
