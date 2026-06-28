@@ -23,14 +23,32 @@ export function AuthScreen({ config, onLogin, saveConfig }) {
     setLoading(true);
     setErr("");
     try {
-      const withTimeout = (p, ms) => Promise.race([p, new Promise((_, r) => setTimeout(() => r(new Error("timeout")), ms))]);
-      const authUser = await withTimeout(authService.login(loginForm.username, loginForm.password), 10000);
+      const wt = (p, ms) => Promise.race([p, new Promise((_, r) => setTimeout(() => r(new Error("timeout")), ms))]);
+
+      // Intento 1 con 20s — cold start de Supabase free tier puede tardar 15s
+      let authUser = null;
+      try {
+        authUser = await wt(authService.login(loginForm.username, loginForm.password), 20000);
+      } catch (e1) {
+        if (e1.message?.includes("timeout")) {
+          // Intento 2: segundo intento mientras Supabase despierta
+          setErr("Supabase tardó en responder, reintentando…");
+          try {
+            authUser = await wt(authService.login(loginForm.username, loginForm.password), 20000);
+          } catch {
+            setErr("No se pudo conectar con Supabase. Si el problema persiste, ve a supabase.com/dashboard y verifica que tu proyecto esté activo (no pausado).");
+            return;
+          }
+        } else {
+          throw e1;
+        }
+      }
       if (!authUser) { setErr("Credenciales incorrectas"); return; }
 
       let profile = null;
       for (let attempt = 0; attempt < 3 && !profile; attempt++) {
         if (attempt > 0) await new Promise(r => setTimeout(r, 800 * attempt));
-        profile = await withTimeout(userService.getProfile(authUser.id), 8000).catch(() => null);
+        profile = await wt(userService.getProfile(authUser.id), 10000).catch(() => null);
       }
       if (profile && !profile.empresa_id) {
         setErr("Tu cuenta existe pero no tiene empresa asignada. Contacta al administrador.");
@@ -51,7 +69,10 @@ export function AuthScreen({ config, onLogin, saveConfig }) {
       });
     } catch (e) {
       const isTimeout = e.message?.includes("timeout");
-      setErr(isTimeout ? "Sin conexión. Verifica tu internet e intenta de nuevo." : "Credenciales incorrectas");
+      setErr(isTimeout
+        ? "Supabase no respondió. Ve a supabase.com/dashboard y verifica que tu proyecto no esté pausado."
+        : (e.message?.includes("Invalid") || e.message?.includes("credentials") ? "Credenciales incorrectas" : (e.message || "Error al iniciar sesión"))
+      );
     } finally {
       setLoading(false);
     }
