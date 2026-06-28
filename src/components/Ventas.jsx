@@ -428,7 +428,7 @@ function BarcodeScannerButton({ onScan }) {
 // ╔══════════════════════════════════════════════════════════════════════╗
 // ║  VENTAS                                                             ║
 // ╚══════════════════════════════════════════════════════════════════════╝
-export function Ventas({ D, save, user, config, logAction, onRefreshDashboard, onReloadSales, salesLoading }) {
+export function Ventas({ D, save, user, config, logAction, onRefreshDashboard, onReloadSales, salesLoading, salesError }) {
   const { sales, customers, products, inventory, categories } = D;
   const isMobile = useIsMobile();
   const [filter, setFilter] = useState("all"); const [q, setQ] = useState(""); const [modal, setModal] = useState(null); const [detail, setDetail] = useState(null);
@@ -676,7 +676,14 @@ export function Ventas({ D, save, user, config, logAction, onRefreshDashboard, o
         <div style={{ textAlign: "center", padding: "40px 16px", color: C.textFaint }}>
           <div style={{ fontSize: 28, marginBottom: 8 }}>⏳</div>
           <div style={{ fontSize: 13, fontWeight: 500 }}>Cargando ventas desde Supabase…</div>
-          <div style={{ fontSize: 11, marginTop: 4, color: C.textFaint }}>Esto puede tomar algunos segundos</div>
+          <div style={{ fontSize: 11, marginTop: 4 }}>Esto puede tomar algunos segundos</div>
+        </div>
+      ) : salesError && sales.length === 0 ? (
+        <div style={{ textAlign: "center", padding: "40px 16px" }}>
+          <div style={{ fontSize: 28, marginBottom: 8 }}>⚠️</div>
+          <div style={{ fontSize: 14, fontWeight: 600, marginBottom: 4 }}>No se pudieron cargar las ventas</div>
+          <div style={{ fontSize: 12, color: C.textFaint, marginBottom: 16 }}>Problema de conexión con Supabase. Tus ventas siguen guardadas.</div>
+          {onReloadSales && <button onClick={onReloadSales} style={mkBtn("primary")}>↺ Reintentar</button>}
         </div>
       ) : filtered.length === 0 ? <Empty icon="🛒" title="Sin ventas" sub={sales.length === 0 ? "Registra tu primera venta" : "Sin resultados"} action={<div style={{ display: "flex", gap: 8, flexWrap: "wrap", justifyContent: "center" }}>{sales.length === 0 && onReloadSales && <button onClick={onReloadSales} style={mkBtn("ghost")}>↺ Recargar ventas</button>}<button onClick={() => setModal("new")} style={mkBtn("primary")}>+ Registrar venta</button></div>} /> :
         filtered.map(s => (

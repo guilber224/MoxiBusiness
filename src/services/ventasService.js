@@ -9,27 +9,30 @@ const setLocal = (v, empresaId) => localStorage.setItem(_key(empresaId), JSON.st
 export const ventasService = {
   async getVentas(empresaId) {
     if (!empresaId) return null;
-    // Usar columnas explícitas — evita problemas con select("*") cuando hay
-    // columnas duplicadas (ej: paymentMethod + payment_method) o tipos no soportados
-    const COLS = "id,empresa_id,customerId,customerName,customerMarket,date,items,subtotal,discount,discountType,total,paid,debt,notes,paymentMethod,payments,createdAt,usuario_id,numero";
+
+    // Intento 1: select(*) — igual que productosService y gastosService.
+    // PostgREST devuelve todas las columnas existentes; columnas adicionales
+    // (ej: payment_method añadida por ALTER TABLE) llegan como claves JSON extra,
+    // lo cual es válido y normalizeSales las ignora sin problema.
     const { data, error } = await supabase
       .from("ventas")
-      .select(COLS)
+      .select("*")
       .eq("empresa_id", empresaId);
-    if (error) {
-      console.warn("[getVentas] explicit cols failed:", error.code, error.message);
-      // Último recurso: select mínimo para al menos mostrar las ventas
-      const { data: d2, error: e2 } = await supabase
-        .from("ventas")
-        .select("id,empresa_id,customerId,customerName,date,items,total,paid,debt,paymentMethod,createdAt")
-        .eq("empresa_id", empresaId);
-      if (e2) {
-        console.warn("[getVentas] minimal cols also failed:", e2.code, e2.message);
-        return isSupabaseUUID(empresaId) ? null : getLocal(empresaId);
-      }
-      return d2 || [];
-    }
-    return data || [];
+
+    if (!error) return data || [];
+
+    console.warn("[getVentas] select(*) falló:", error.code, error.message);
+
+    // Intento 2: solo columnas que analyticsService confirma existen
+    const { data: d2, error: e2 } = await supabase
+      .from("ventas")
+      .select("id,empresa_id,total,paid,debt,items,date,createdAt")
+      .eq("empresa_id", empresaId);
+
+    if (!e2) return d2 || [];
+
+    console.error("[getVentas] fallback también falló:", e2.code, e2.message);
+    return isSupabaseUUID(empresaId) ? null : getLocal(empresaId);
   },
 
   async createVenta(venta, user) {
@@ -98,12 +101,10 @@ export const ventasService = {
       return { ok: true };
     } catch (e) {
       console.warn("fallback deleteVenta:", e.message);
-      // Empresa local (no UUID Supabase): borrar de localStorage y reportar éxito local
       if (!isSupabaseUUID(empresaId)) {
         setLocal(getLocal(empresaId).filter(v => v.id !== id), empresaId);
         return { ok: true, local: true };
       }
-      // Empresa Supabase real: el borrado NO se aplicó en la nube — reportar fallo
       return { ok: false, error: e.message };
     }
   },

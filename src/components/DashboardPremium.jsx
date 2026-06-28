@@ -29,18 +29,20 @@ export function DashboardPremium({ D, setTab, user, refreshTrigger = 0 }) {
 
   const { sales = [], customers = [], products = [], inventory = [], expenses = [], categories = [] } = D || {};
 
-  // Carga analytics desde Supabase para el periodo seleccionado
+  // Carga analytics desde Supabase — timeout de 6s para no bloquear con "Actualizando..."
+  // Si Supabase tarda más de 6s, se muestran datos locales (cálculo desde sales/expenses).
+  // El cache de 3 minutos en analyticsService hace que la segunda visita sea instantánea.
   useEffect(() => {
     if (!user?.empresa_id) return;
     setSyncing(true);
     const eid = user.empresa_id;
+    const t = (ms) => new Promise(res => setTimeout(() => res(null), ms));
     Promise.all([
-      analyticsService.getKPIs(eid, periodo),
-      analyticsService.getComparativo(eid, periodo),
-      analyticsService.getTopProductos(eid, periodo, 5),
-      analyticsService.getTopClientes(eid, periodo, 5),
+      Promise.race([analyticsService.getKPIs(eid, periodo),          t(6000)]),
+      Promise.race([analyticsService.getComparativo(eid, periodo),   t(6000)]),
+      Promise.race([analyticsService.getTopProductos(eid, periodo, 5), t(6000)]),
+      Promise.race([analyticsService.getTopClientes(eid, periodo, 5),  t(6000)]),
     ]).then(([k, c, tp, tc]) => {
-      if (k === null) console.warn("[DashboardPremium] getKPIs null — revisar RLS o empresa_id:", eid);
       setKpis(k);
       setComparativo(c);
       setTopProds(Array.isArray(tp) ? tp : []);

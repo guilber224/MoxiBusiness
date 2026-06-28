@@ -60,6 +60,7 @@ export default function App() {
   const [suscripcion,setSuscripcion]=useState(null);
   const [waConfig,setWaConfig]=useState("+59163506018");
   const [salesLoading,setSalesLoading]=useState(false);
+  const [salesError,setSalesError]=useState(false);
   const isMobile=useIsMobile();
 
   // Refs para acceder a user/data actuales dentro de callbacks sin stale closures
@@ -325,13 +326,17 @@ const init = async () => {
       setIsLoadingScope(false); // UI desbloqueada aquí — ventas se cargan aparte
 
       // Paso 2: ventas en background — no bloquean el render inicial
+      setSalesError(false);
       ventasService.getVentas(eid)
         .then(supaVentas => {
           if (Array.isArray(supaVentas)) {
             setData(d => d ? { ...d, sales: normalizeSales(supaVentas) } : d);
+          } else {
+            // null = todas las queries fallaron — mostrar estado de error en Ventas
+            setSalesError(true);
           }
         })
-        .catch(e => { console.warn("[App] getVentas background failed:", e?.message); })
+        .catch(e => { console.warn("[App] getVentas background failed:", e?.message); setSalesError(true); })
         .finally(() => setSalesLoading(false));
     });
   }, [user?.empresa_id]); // eslint-disable-line react-hooks/exhaustive-deps
@@ -433,12 +438,15 @@ const init = async () => {
   const reloadSales = useCallback(async () => {
     if (!user?.empresa_id) return;
     setSalesLoading(true);
+    setSalesError(false);
     try {
       const supaVentas = await ventasService.getVentas(user.empresa_id);
       if (Array.isArray(supaVentas)) {
         setData(d => ({ ...d, sales: normalizeSales(supaVentas) }));
+      } else {
+        setSalesError(true);
       }
-    } catch (e) { console.warn("[reloadSales]", e.message); }
+    } catch (e) { console.warn("[reloadSales]", e.message); setSalesError(true); }
     finally { setSalesLoading(false); }
   }, [user?.empresa_id]); // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -538,7 +546,7 @@ const init = async () => {
             <div style={{ maxWidth: 1400, margin: "0 auto" }}>
               {tab === "dashboard"   && <DashboardPremium D={data} setTab={setTab} user={user} refreshTrigger={rtRefreshTrigger} />}
               {tab === "clientes"    && <Clientes D={data} save={save} user={user} />}
-              {tab === "ventas"      && <Ventas D={data} save={save} user={user} config={data.config} logAction={logAction} onRefreshDashboard={()=>{ invalidateAnalyticsCache(); setRtRefreshTrigger(t=>t+1); }} onReloadSales={reloadSales} salesLoading={salesLoading} />}
+              {tab === "ventas"      && <Ventas D={data} save={save} user={user} config={data.config} logAction={logAction} onRefreshDashboard={()=>{ invalidateAnalyticsCache(); setRtRefreshTrigger(t=>t+1); }} onReloadSales={reloadSales} salesLoading={salesLoading} salesError={salesError} />}
               {tab === "pedidos"     && <Pedidos D={data} save={save} user={user} config={data.config} logAction={logAction} onRefreshDashboard={()=>setRtRefreshTrigger(t=>t+1)} />}
               {tab === "deudas"      && <Deudas D={data} save={save} user={user} logAction={logAction} />}
               {tab === "productos"   && <Productos D={data} save={save} user={user} />}
