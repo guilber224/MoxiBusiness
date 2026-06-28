@@ -1,4 +1,5 @@
 import { useState } from "react";
+import toast from "react-hot-toast";
 import { Search, TrendingDown } from "lucide-react";
 import { gastosService } from "../services/gastosService.js";
 import { isSupabaseUUID } from "../utils/storageScope.js";
@@ -44,7 +45,7 @@ export function GastosPage({ D, save, user, logAction, onRefreshDashboard }) {
     };
     const saved = await gastosService.createGasto(gasto, user.empresa_id);
     if (saved?._localOnly && isSupabaseUUID(user?.empresa_id)) {
-      alert("⚠ Error al guardar gasto en Supabase. Revisa la consola (F12).");
+      toast.error("Error al guardar el gasto. Revisa tu conexión e intenta de nuevo.");
       return;
     }
     save("expenses", [gasto, ...(expenses || [])]);
@@ -56,7 +57,7 @@ export function GastosPage({ D, save, user, logAction, onRefreshDashboard }) {
     if (!deleteTarget) return;
     const res = await gastosService.deleteGasto(deleteTarget.id, user.empresa_id).catch(e => ({ ok: false, error: e.message }));
     if (res?.ok === false) {
-      alert("⚠ No se pudo eliminar el gasto en Supabase. Revisa tu conexión e intenta de nuevo.");
+      toast.error("No se pudo eliminar el gasto. Revisa tu conexión e intenta de nuevo.");
       setDeleteTarget(null);
       return;
     }

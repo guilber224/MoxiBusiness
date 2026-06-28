@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from "react";
-import { Shield, RefreshCw, MessageCircle, Check, X, Edit2, Users, Trash2, AlertTriangle } from "lucide-react";
+import { Shield, RefreshCw, MessageCircle, Check, X, Edit2, Users, Trash2, AlertTriangle, CreditCard } from "lucide-react";
 import { suscripcionService } from "../services/suscripcionService.js";
 import { FONT } from "../theme.jsx";
 import toast from "react-hot-toast";
@@ -27,21 +27,26 @@ export function SuperAdminPanel() {
   const [editingWa, setEditingWa] = useState(false);
   const [waInput, setWaInput] = useState("");
   const [extending, setExtending] = useState(null);
-  const [confirmDelete, setConfirmDelete] = useState(null); // userId a eliminar
+  const [confirmDelete, setConfirmDelete] = useState(null);
   const [deleting, setDeleting] = useState(false);
+  const [pagos, setPagos] = useState([]);
+  const [pagoForm, setPagoForm] = useState(null); // { empresa_id, nombre_empresa, monto, notas }
+  const [savingPago, setSavingPago] = useState(false);
 
   const cargar = useCallback(async () => {
     setLoading(true);
     try {
-      const [sus, cfg, usrs] = await Promise.all([
+      const [sus, cfg, usrs, pgs] = await Promise.all([
         suscripcionService.getTodasLasSuscripciones(),
         suscripcionService.getConfig(),
         suscripcionService.getUsuariosSistema(),
+        suscripcionService.getTodasPagos(),
       ]);
       setSuscripciones(sus);
       setWhatsapp(cfg.whatsapp_soporte || "");
       setWaInput(cfg.whatsapp_soporte || "");
       setUsuarios(usrs);
+      setPagos(pgs);
     } catch (e) {
       toast.error("Error al cargar: " + (e.message || e));
     } finally {
@@ -212,6 +217,59 @@ export function SuperAdminPanel() {
                 {sus.notas}
               </div>
             )}
+
+            {/* Registro de pago inline */}
+            {pagoForm?.empresa_id === sus.empresa_id ? (
+              <div style={{ marginTop: 10, borderTop: "1px solid var(--color-border)", paddingTop: 10, display: "flex", gap: 6, flexWrap: "wrap", alignItems: "center" }}>
+                <input
+                  type="number"
+                  placeholder="Monto Bs."
+                  value={pagoForm.monto}
+                  onChange={e => setPagoForm(f => ({ ...f, monto: e.target.value }))}
+                  style={{ width: 110, background: "var(--color-bg-primary)", border: "1px solid var(--color-border)", borderRadius: 7, padding: "6px 10px", fontSize: 13, color: "var(--color-text)", fontFamily: FONT, outline: "none" }}
+                  autoFocus
+                />
+                <input
+                  placeholder="Notas (ej: QR, efectivo…)"
+                  value={pagoForm.notas}
+                  onChange={e => setPagoForm(f => ({ ...f, notas: e.target.value }))}
+                  style={{ flex: 1, minWidth: 140, background: "var(--color-bg-primary)", border: "1px solid var(--color-border)", borderRadius: 7, padding: "6px 10px", fontSize: 13, color: "var(--color-text)", fontFamily: FONT, outline: "none" }}
+                />
+                <button
+                  disabled={savingPago}
+                  onClick={async () => {
+                    setSavingPago(true);
+                    try {
+                      await suscripcionService.registrarPago(pagoForm.empresa_id, pagoForm.nombre_empresa, { monto: pagoForm.monto, notas: pagoForm.notas });
+                      toast.success("Pago registrado");
+                      setPagoForm(null);
+                      await cargar();
+                    } catch (e) {
+                      toast.error("Error: " + (e.message || e));
+                    } finally { setSavingPago(false); }
+                  }}
+                  style={{ background: "#22c55e", border: "none", borderRadius: 7, padding: "6px 12px", cursor: "pointer", fontSize: 11, fontWeight: 700, color: "#fff", fontFamily: FONT, opacity: savingPago ? 0.5 : 1 }}
+                >
+                  {savingPago ? "…" : "Guardar"}
+                </button>
+                <button onClick={() => setPagoForm(null)} style={{ background: "var(--color-bg-primary)", border: "1px solid var(--color-border)", borderRadius: 7, padding: "6px 8px", cursor: "pointer", display: "flex", fontFamily: FONT }}>
+                  <X size={12} color="var(--color-text-faint)" />
+                </button>
+              </div>
+            ) : (
+              <div style={{ marginTop: 8, display: "flex", alignItems: "center", gap: 8 }}>
+                <button
+                  onClick={() => setPagoForm({ empresa_id: sus.empresa_id, nombre_empresa: sus.nombre_empresa, monto: "", notas: "" })}
+                  style={{ background: "rgba(34,197,94,0.08)", border: "1px solid rgba(34,197,94,0.2)", borderRadius: 7, padding: "4px 10px", cursor: "pointer", fontSize: 11, fontWeight: 600, color: "#22c55e", fontFamily: FONT, display: "flex", alignItems: "center", gap: 5 }}
+                >
+                  <CreditCard size={11} /> Registrar pago
+                </button>
+                {(() => {
+                  const total = pagos.filter(p => p.empresa_id === sus.empresa_id && p.monto).reduce((s, p) => s + Number(p.monto), 0);
+                  return total > 0 ? <span style={{ fontSize: 11, color: "var(--color-text-faint)" }}>Total cobrado: <strong style={{ color: "#22c55e" }}>Bs. {total.toFixed(2)}</strong></span> : null;
+                })()}
+              </div>
+            )}
           </div>
         ))}
       </div>
@@ -279,6 +337,37 @@ export function SuperAdminPanel() {
         <p style={{ margin: "10px 0 0", fontSize: 11, color: "var(--color-text-faint)" }}>
           Al eliminar un usuario se borra su perfil y suscripción. Para borrar su cuenta de Supabase Auth ve a Dashboard → Authentication → Users.
         </p>
+      </div>
+
+      {/* Payment history */}
+      <div style={card}>
+        <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 16 }}>
+          <CreditCard size={16} color="#22C5FE" strokeWidth={2} />
+          <span style={{ fontWeight: 600, fontSize: 13 }}>Historial de pagos ({pagos.length})</span>
+          {pagos.length > 0 && (
+            <span style={{ fontSize: 11, color: "#22c55e", fontWeight: 600, marginLeft: "auto" }}>
+              Total: Bs. {pagos.filter(p => p.monto).reduce((s, p) => s + Number(p.monto), 0).toFixed(2)}
+            </span>
+          )}
+        </div>
+
+        {loading ? (
+          <div style={{ textAlign: "center", padding: "24px 0", color: "var(--color-text-faint)", fontSize: 13 }}>Cargando…</div>
+        ) : pagos.length === 0 ? (
+          <div style={{ textAlign: "center", padding: "24px 0", color: "var(--color-text-faint)", fontSize: 13 }}>No hay pagos registrados aún</div>
+        ) : pagos.map(p => (
+          <div key={p.id} style={{ borderRadius: 10, border: "1px solid var(--color-border)", padding: "10px 14px", marginBottom: 6, display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, flexWrap: "wrap" }}>
+            <div style={{ minWidth: 0 }}>
+              <div style={{ fontWeight: 600, fontSize: 13 }}>{p.nombre_empresa}</div>
+              <div style={{ fontSize: 11, color: "var(--color-text-faint)", marginTop: 2 }}>
+                {p.notas || "Sin notas"} · {new Date(p.created_at).toLocaleDateString("es-BO", { day: "2-digit", month: "short", year: "numeric" })}
+              </div>
+            </div>
+            <div style={{ fontWeight: 700, fontSize: 16, color: p.monto ? "#22c55e" : "var(--color-text-faint)" }}>
+              {p.monto ? `Bs. ${Number(p.monto).toFixed(2)}` : "—"}
+            </div>
+          </div>
+        ))}
       </div>
 
       <style>{`@keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }`}</style>

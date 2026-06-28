@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef } from "react";
 import {
-  X, Download, Printer, Camera, Search, ScanLine,
+  X, Download, Printer, Camera, Search, ScanLine, MessageCircle,
   Banknote, Building2, QrCode, CreditCard, ChevronLeft, ChevronRight,
 } from "lucide-react";
 import { ventasService } from "../services/ventasService.js";
@@ -164,7 +164,34 @@ const downloadSaleReceipt = async ({ sale, config, user }) => {
 };
 
 // ── ComprobanteModal ──────────────────────────────────────────────────────────
-function ComprobanteModal({ sale, config, user, onClose }) {
+function buildWhatsAppUrl({ sale, config, products }) {
+  const biz = safeBusinessName(config);
+  const fecha = fDate(sale.date || sale.createdAt);
+  const lines = (sale.items || []).map(item => {
+    const prod = (products || []).find(p => p.id === item.productId);
+    const name = prod?.name || item.productName || "Producto";
+    const sub = n(item.sub ?? item.subtotal);
+    return `• ${name} x${item.qty} — Bs. ${sub.toFixed(2)}`;
+  });
+  const total = n(sale.total);
+  const debt = n(sale.debt || 0);
+  const msg = [
+    `🧾 *Comprobante de Venta*`,
+    `📍 ${biz}`,
+    `📅 ${fecha}`,
+    ``,
+    ...lines,
+    ``,
+    `💰 *Total: Bs. ${total.toFixed(2)}*`,
+    debt > 0 ? `⏳ Saldo pendiente: Bs. ${debt.toFixed(2)}` : null,
+    ``,
+    `¡Gracias por su compra! 🙏`,
+    `_Moxi Business_`,
+  ].filter(x => x !== null).join("\n");
+  return `https://wa.me/?text=${encodeURIComponent(msg)}`;
+}
+
+function ComprobanteModal({ sale, config, user, products, onClose }) {
   const invoiceRef = useRef(null);
   const businessName = safeBusinessName(config);
 
@@ -318,6 +345,14 @@ function ComprobanteModal({ sale, config, user, onClose }) {
         <div style={{ display: "flex", gap: 8, padding: "14px 16px", borderTop: "1px solid var(--color-border)", background: "var(--color-bg-surface)", flexShrink: 0 }}>
           <button onClick={onClose} style={{ ...mkBtn("ghost") }}>Cerrar</button>
           <div style={{ flex: 1 }} />
+          <a
+            href={buildWhatsAppUrl({ sale, config, products })}
+            target="_blank"
+            rel="noreferrer"
+            style={{ ...mkBtn("ghost"), display: "flex", alignItems: "center", gap: 6, textDecoration: "none", color: "#25D366", borderColor: "rgba(37,211,102,0.3)", background: "rgba(37,211,102,0.08)" }}
+          >
+            <MessageCircle size={14} /> WhatsApp
+          </a>
           <button onClick={handlePrint} style={{ ...mkBtn("ghost"), display: "flex", alignItems: "center", gap: 6 }}>
             <Printer size={14} /> Imprimir
           </button>
@@ -1036,7 +1071,7 @@ export function Ventas({ D, save, user, config, logAction, onRefreshDashboard })
           <button onClick={doDeleteSale} style={mkBtn("danger")}>Eliminar</button>
         </div>
       </Modal>}
-      {comprobanteVenta && <ComprobanteModal sale={comprobanteVenta} config={config} user={user} onClose={() => setComprobanteVenta(null)} />}
+      {comprobanteVenta && <ComprobanteModal sale={comprobanteVenta} config={config} user={user} products={D.products} onClose={() => setComprobanteVenta(null)} />}
     </div>
   );
 }

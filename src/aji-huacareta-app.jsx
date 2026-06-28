@@ -494,6 +494,27 @@ const init = async () => {
 
           <Topbar isMobile={isMobile} sidebarOpen={sidebarOpen} setSidebarOpen={setSidebarOpen} sidebarCollapsed={sidebarCollapsed} setSidebarCollapsed={setSidebarCollapsed} setTab={setTab} user={user} data={data} appDebtClients={appDebtClients} appLowStock={appLowStock} />
 
+          {/* ── AVISO DE VENCIMIENTO PRÓXIMO ── */}
+          {user?.role !== "superadmin" && suscripcion && !suscripcionService.estaVencida(suscripcion) && suscripcionService.diasRestantes(suscripcion) <= 7 && (
+            <div style={{ background: "#92400e", borderBottom: "1px solid #b45309", padding: "8px 18px", display: "flex", alignItems: "center", gap: 10, fontSize: 13, color: "#fef3c7", flexShrink: 0 }}>
+              <span>⚠️</span>
+              <span>
+                {suscripcionService.diasRestantes(suscripcion) === 0
+                  ? "Tu suscripción vence hoy."
+                  : `Tu suscripción vence en ${suscripcionService.diasRestantes(suscripcion)} día${suscripcionService.diasRestantes(suscripcion) !== 1 ? "s" : ""}.`}
+                {" "}Contáctanos para renovarla.
+              </span>
+              <a
+                href={`https://wa.me/${waConfig.replace(/\D/g, "")}?text=${encodeURIComponent("Hola, quiero renovar mi suscripción de Moxi Business.")}`}
+                target="_blank"
+                rel="noreferrer"
+                style={{ marginLeft: "auto", background: "#15803d", color: "white", borderRadius: 6, padding: "4px 12px", fontSize: 12, fontWeight: 600, textDecoration: "none", fontFamily: FONT, whiteSpace: "nowrap" }}
+              >
+                Renovar por WhatsApp
+              </a>
+            </div>
+          )}
+
           {/* ── MAIN CONTENT ── */}
           <main style={{ flex: 1, overflowY: "auto", padding: isMobile ? "14px 14px 80px" : "28px 32px", minWidth: 0 }}>
             <div style={{ maxWidth: 1400, margin: "0 auto" }}>

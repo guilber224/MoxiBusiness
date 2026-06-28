@@ -91,6 +91,24 @@ export const suscripcionService = {
     return data || [];
   },
 
+  async registrarPago(empresa_id, nombre_empresa, { monto, plan = "activo", dias, notas = "" }) {
+    const { error } = await supabase.from("pagos").insert({
+      empresa_id, nombre_empresa,
+      monto: monto ? Number(monto) : null,
+      plan, dias, notas,
+    });
+    if (error) throw error;
+  },
+
+  async getTodasPagos() {
+    const { data, error } = await supabase
+      .from("pagos")
+      .select("*")
+      .order("created_at", { ascending: false });
+    if (error) throw error;
+    return data || [];
+  },
+
   async eliminarUsuario(userId, empresaId) {
     if (empresaId) {
       await supabase.from("suscripciones").delete().eq("empresa_id", empresaId);
