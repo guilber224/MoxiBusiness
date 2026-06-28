@@ -33,6 +33,7 @@ import { Caja } from "./components/Caja.jsx";
 import { Analisis } from "./components/Analisis.jsx";
 import { Exportar } from "./components/Exportar.jsx";
 import { AuthScreen } from "./screens/AuthScreen.jsx";
+import { LandingPage } from "./screens/LandingPage.jsx";
 import { ResetPasswordScreen } from "./screens/ResetPasswordScreen.jsx";
 import { OnboardingIncompleteScreen } from "./screens/OnboardingIncompleteScreen.jsx";
 import { Sidebar } from "./components/Sidebar.jsx";
@@ -58,6 +59,7 @@ export default function App() {
   const [rtRefreshTrigger,setRtRefreshTrigger]=useState(0);
   const [suscripcion,setSuscripcion]=useState(null);
   const [waConfig,setWaConfig]=useState("+59163506018");
+  const [showLanding,setShowLanding]=useState(true);
   const isMobile=useIsMobile();
 
   // Refs para acceder a user/data actuales dentro de callbacks sin stale closures
@@ -97,6 +99,7 @@ export default function App() {
     setUser(null);
     setData(createEmptyAppState());
     setSuscripcion(null);
+    setShowLanding(false);
     setTab("dashboard");
     setIsLoadingScope(false);
     setSidebarOpen(false);
@@ -456,6 +459,7 @@ const init = async () => {
   if(recoveryMode) return <ResetPasswordScreen onDone={() => setRecoveryMode(false)} />;
   // isRestoringSession: hay sesión activa pero el perfil aún se está cargando — no mostrar AuthScreen
   if(!user && isRestoringSession) return loadingScreen;
+  if(!user && showLanding) return <LandingPage whatsapp={waConfig} onLogin={() => setShowLanding(false)} onRegister={() => setShowLanding(false)} />;
   if(!user) return <AuthScreen config={data.config} onLogin={loginUser} saveConfig={value=>save("config", value)}/>;
   // Usuario Supabase sin empresa_id: bloquear acceso total al ERP.
   // No renderizar dashboard, ventas, clientes ni ningún módulo.
