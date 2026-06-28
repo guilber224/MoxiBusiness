@@ -1,6 +1,6 @@
 import {
   LayoutDashboard, Users, ShoppingCart, ClipboardList, CreditCard, Package,
-  Archive, Factory, Truck, Wallet, TrendingDown, BarChart2, Download, Settings,
+  Archive, Factory, Truck, Wallet, TrendingDown, BarChart2, Download, Settings, Shield,
 } from "lucide-react";
 
 // ╔══════════════════════════════════════════════════════════════════════╗
@@ -12,19 +12,22 @@ export const NAV_GROUPS = [
   { label:"Operaciones",items:[{id:"productos",label:"Productos"},{id:"inventario",label:"Inventario"},{id:"produccion",label:"Producción"},{id:"proveedores",label:"Proveedores"}] },
   { label:"Finanzas",  items:[{id:"caja",label:"Flujo de Caja"},{id:"analisis",label:"Análisis"},{id:"exportar",label:"Exportar Datos"}] },
   { label:"Administración", items:[{id:"usuarios",label:"Ajustes"}] },
+  { label:"Sistema",        items:[{id:"superadmin",label:"Super Admin"}] },
 ];
 export const ROLE_OPTIONS = [
-  { id:"admin",    label:"Administrador" },
-  { id:"vendedor", label:"Vendedor" },
-  { id:"operador", label:"Operador" },
-  { id:"usuario",  label:"Usuario" },
+  { id:"admin",      label:"Administrador" },
+  { id:"vendedor",   label:"Vendedor" },
+  { id:"operador",   label:"Operador" },
+  { id:"usuario",    label:"Usuario" },
+  { id:"superadmin", label:"Super Admin" },
 ];
 export const ROLE_LABELS = Object.fromEntries(ROLE_OPTIONS.map(role => [role.id, role.label]));
 export const ROLES = {
-  admin:    ["dashboard","clientes","ventas","pedidos","deudas","productos","inventario","produccion","proveedores","caja","gastos","analisis","exportar","usuarios"],
-  vendedor: ["dashboard","clientes","ventas","pedidos","deudas","caja","gastos"],
-  operador: ["dashboard","productos","inventario","produccion"],
-  usuario:  ["ventas"],
+  admin:      ["dashboard","clientes","ventas","pedidos","deudas","productos","inventario","produccion","proveedores","caja","gastos","analisis","exportar","usuarios"],
+  vendedor:   ["dashboard","clientes","ventas","pedidos","deudas","caja","gastos"],
+  operador:   ["dashboard","productos","inventario","produccion"],
+  usuario:    ["ventas"],
+  superadmin: ["dashboard","clientes","ventas","pedidos","deudas","productos","inventario","produccion","proveedores","caja","gastos","analisis","exportar","usuarios","superadmin"],
 };
 
 // Lucide icon components mapped by nav id
@@ -43,4 +46,5 @@ export const NAV_ICONS = {
   analisis:    BarChart2,
   exportar:    Download,
   usuarios:    Settings,
+  superadmin:  Shield,
 };

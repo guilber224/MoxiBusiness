@@ -37,7 +37,10 @@ import { ResetPasswordScreen } from "./screens/ResetPasswordScreen.jsx";
 import { OnboardingIncompleteScreen } from "./screens/OnboardingIncompleteScreen.jsx";
 import { Sidebar } from "./components/Sidebar.jsx";
 import { UsuariosAdmin } from "./components/UsuariosAdmin.jsx";
+import { SuperAdminPanel } from "./components/SuperAdminPanel.jsx";
 import { Topbar } from "./components/Topbar.jsx";
+import { SuscripcionVencida } from "./screens/SuscripcionVencida.jsx";
+import { suscripcionService } from "./services/suscripcionService.js";
 import { loadStoredValue, persistValue, buildActivityEntry, DEFAULT_CONFIG, DEFAULT_ACTIVITY_LOGS } from "./utils/appStorage.js";
 import { syncDiff, SYNC_KEYS, createEmptyAppState } from "./utils/syncDiff.js";
 import { PRODUCTS0, FORMULAS0, CUSTOMERS0, DEFAULT_USERS } from "./seedData.js";
@@ -53,6 +56,8 @@ export default function App() {
   const [isRestoringSession,setIsRestoringSession]=useState(false);
   const [isLoadingScope,setIsLoadingScope]=useState(false);
   const [rtRefreshTrigger,setRtRefreshTrigger]=useState(0);
+  const [suscripcion,setSuscripcion]=useState(null);
+  const [waConfig,setWaConfig]=useState("+59163506018");
   const isMobile=useIsMobile();
 
   // Refs para acceder a user/data actuales dentro de callbacks sin stale closures
@@ -91,12 +96,24 @@ export default function App() {
     dataRef.current   = null;
     setUser(null);
     setData(createEmptyAppState());
+    setSuscripcion(null);
     setTab("dashboard");
     setIsLoadingScope(false);
     setSidebarOpen(false);
     try { await supabase.removeAllChannels(); } catch {}
     try { await supabase.auth.signOut(); } catch {}
   };
+
+  // Verificar suscripción después de que el scope se haya hidratado
+  useEffect(() => {
+    if (!user?.empresa_id || isLoadingScope || user?.role === "superadmin") return;
+    suscripcionService.getOCrearTrial(user.empresa_id, dataRef.current?.config?.businessName || "")
+      .then(sus => setSuscripcion(sus))
+      .catch(() => {});
+    suscripcionService.getConfig()
+      .then(cfg => setWaConfig(cfg.whatsapp_soporte || "+59163506018"))
+      .catch(() => {});
+  }, [user?.empresa_id, isLoadingScope, user?.role]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Reintentar onboarding: recarga perfil desde Supabase.
   // Si sigue sin empresa_id, cierra sesión para que el usuario re-registre su empresa.
@@ -446,6 +463,10 @@ const init = async () => {
   // Bloquear render del ERP hasta que Supabase haya hidratado los datos del scope actual.
   // Sin esto, el dashboard muestra KPIs vacíos ($0, 0 clientes) durante 1-3 segundos.
   if(isLoadingScope) return loadingScreen;
+  // Suscripción vencida: bloquear acceso al ERP (excepto superadmin)
+  if(user?.role !== "superadmin" && suscripcion && suscripcionService.estaVencida(suscripcion)) {
+    return <SuscripcionVencida suscripcion={suscripcion} whatsapp={waConfig} onLogout={handleLogout} />;
+  }
 
   const navLabel=NAV_GROUPS.flatMap(g=>g.items).find(i=>i.id===tab)?.label||BRAND_NAME;
   const businessName=safeBusinessName(data.config);
@@ -490,6 +511,7 @@ const init = async () => {
               {tab === "analisis"    && <Analisis D={data} />}
               {tab === "exportar"    && <Exportar D={data} />}
               {tab === "usuarios"    && <UsuariosAdmin D={data} save={save} user={user} logAction={logAction} onProfileUpdate={newName=>setUser(u=>({...u,name:newName}))} />}
+              {tab === "superadmin" && <SuperAdminPanel />}
             </div>
           </main>
 
