@@ -235,7 +235,12 @@ const init = async () => {
           setIsRestoringSession(true);
           setSessionChecked(true);
         }
-        userService.getProfile(session.user.id).then(profile => {
+        // Timeout de 6s: si Supabase no responde, desbloquear pantalla sin perfil
+        const profileRace = Promise.race([
+          userService.getProfile(session.user.id),
+          new Promise(r => setTimeout(() => r(null), 6000)),
+        ]);
+        profileRace.then(profile => {
           if (profile) {
             const newUser = {
               id: session.user.id,
@@ -243,8 +248,6 @@ const init = async () => {
               role: profile.role?.toLowerCase() || "usuario",
               empresa_id: profile.empresa_id,
             };
-            // Actualizar scope síncronamente para que persistValue use el empresa_id correcto
-            // desde el primer tick. isLoadingScope bloquea el ERP antes del render.
             if (newUser.empresa_id) {
               setCurrentEmpresaId(newUser.empresa_id);
               saveLastEmpresaId(newUser.empresa_id);
@@ -252,9 +255,11 @@ const init = async () => {
             }
             userRef.current = newUser;
             setUser(newUser);
+          } else {
+            console.warn("[AUTH] getProfile timeout o sin datos — pantalla desbloqueada");
           }
         }).catch((e) => {
-          console.warn("[AUTH] INITIAL_SESSION getProfile exception:", e?.message);
+          console.warn("[AUTH] getProfile exception:", e?.message);
         }).finally(()=>{
           setSessionChecked(true);
           setIsRestoringSession(false);
@@ -297,15 +302,19 @@ const init = async () => {
     } : d);
     const eid = user.empresa_id;
 
-    // Paso 1: datos críticos en paralelo (bloquean hasta que todos terminen)
+    // T(): garantiza que ninguna query bloquee más de 7 segundos.
+    // Si Supabase no responde a tiempo, resuelve null y el if(Array.isArray()) lo ignora.
+    const T = (p) => Promise.race([p, new Promise(r => setTimeout(() => r(null), 7000))]);
+
+    // Paso 1: datos críticos en paralelo — máximo 7 segundos de espera total
     Promise.all([
-      clientesService.getClientes(eid),
-      productosService.getProductos(eid),
-      inventarioService.getInventario(eid),
-      gastosService.getGastos(eid),
-      movimientosService.getMovimientos(eid),
-      loadStoredValue("config", null),
-      pedidosService.getPedidos(eid),
+      T(clientesService.getClientes(eid)),
+      T(productosService.getProductos(eid)),
+      T(inventarioService.getInventario(eid)),
+      T(gastosService.getGastos(eid)),
+      T(movimientosService.getMovimientos(eid)),
+      T(loadStoredValue("config", null)),
+      T(pedidosService.getPedidos(eid)),
     ]).then(([supaClientes, supaProductos, supaInventario, supaGastos, supaMovimientos, scopedConfig, supaPedidos]) => {
       setData(d => {
         if (!d) return d;
@@ -325,10 +334,12 @@ const init = async () => {
     .finally(() => {
       setIsLoadingScope(false); // UI desbloqueada aquí — ventas se cargan aparte
 
-      // Paso 2: ventas en background — no bloquean el render inicial
+      // Paso 2: ventas en background — no bloquean el render inicial (máx 10s)
       setSalesError(false);
-      ventasService.getVentas(eid)
-        .then(supaVentas => {
+      Promise.race([
+        ventasService.getVentas(eid),
+        new Promise(r => setTimeout(() => r(null), 10000)),
+      ]).then(supaVentas => {
           if (Array.isArray(supaVentas)) {
             setData(d => d ? { ...d, sales: normalizeSales(supaVentas) } : d);
           } else {
@@ -476,6 +487,7 @@ const init = async () => {
       <div style={{width:140,height:2,background:"rgba(255,255,255,0.08)",borderRadius:2,overflow:"hidden"}}>
         <div style={{height:"100%",width:"40%",background:"linear-gradient(90deg,#111E7B,#22C5FE)",borderRadius:2,animation:"moxiLoad 1.2s ease-in-out infinite alternate"}}/>
       </div>
+      <div style={{fontSize:11,color:"rgba(255,255,255,0.22)",marginTop:4}}>Máx. 7 segundos — desbloqueo automático si Supabase tarda</div>
     </div>
   );
   if(!data || !sessionChecked) return loadingScreen;
