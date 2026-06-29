@@ -46,9 +46,27 @@ import { syncDiff, SYNC_KEYS, createEmptyAppState } from "./utils/syncDiff.js";
 import { invalidateAnalyticsCache } from "./services/analyticsService.js";
 import { PRODUCTS0, FORMULAS0, CUSTOMERS0, DEFAULT_USERS } from "./seedData.js";
 
-// Lee datos de claves globales moxi_* o claves legacy ah_* cuando las claves scoped están vacías.
+// Lee datos de cualquier clave localStorage disponible.
+// Busca en: clave global moxi_*, legacy ah_*, y CUALQUIER clave moxi_*_suffix del navegador.
+// Sirve para recuperar datos de cuentas locales anteriores y migrarlos a Supabase.
 const getLocalFallbackData = (primaryKey, legacyKey = null) => {
-  for (const k of [primaryKey, legacyKey].filter(Boolean)) {
+  const suffix = primaryKey.startsWith("moxi_") ? `_${primaryKey.slice(5)}` : null;
+
+  // Candidatos explícitos primero
+  const candidates = [primaryKey, legacyKey].filter(Boolean);
+
+  // Luego escanear TODAS las claves moxi_*_<tipo> del localStorage (recuperación amplia)
+  if (suffix) {
+    try {
+      Object.keys(localStorage).forEach(k => {
+        if (k !== primaryKey && k.startsWith("moxi_") && k.endsWith(suffix)) {
+          candidates.push(k);
+        }
+      });
+    } catch {}
+  }
+
+  for (const k of candidates) {
     try {
       const raw = localStorage.getItem(k);
       const data = raw ? JSON.parse(raw) : null;

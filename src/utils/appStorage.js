@@ -51,17 +51,47 @@ const LEGACY_STORAGE_KEYS = {
 export const DEFAULT_CONFIG = { businessName: "", currency: "BOB", createdAt: null, updatedAt: null };
 export const DEFAULT_ACTIVITY_LOGS = [];
 
+// Devuelve true si el valor es un array vacío — se usa para distinguir
+// "clave existe pero vacía" de "clave no existe o tiene datos reales".
+const isEmptyArray = (v) => Array.isArray(v) && v.length === 0;
+
 export const loadStoredValue = async (key, fallback) => {
   if (getCurrentEmpresaId()) {
-    // Supabase/multiempresa: preferir clave scoped (caché post-hidratación).
+    // 1. Clave scoped del usuario actual (caché post-hidratación)
     const scoped = await DB.get(getScopedStorageKey(key, getCurrentEmpresaId()), undefined);
-    if (scoped !== undefined) return scoped;
-    // Fallback a clave global moxi_* — usuarios que migran de modo local a Supabase
-    // tienen sus datos ahí hasta que se suban a Supabase por primera vez.
+    // Si existe y tiene datos → usar. Si existe pero está vacío → seguir buscando
+    // (puede ser cache corrupto de una hidratación fallida anterior)
+    if (scoped !== undefined && !isEmptyArray(scoped)) return scoped;
+
+    // 2. Clave global moxi_* (usuarios que migraron de modo local a Supabase)
     if (STORAGE_KEYS[key]) {
       const global = await DB.get(STORAGE_KEYS[key], undefined);
-      if (global !== undefined) return global;
+      if (global !== undefined && !isEmptyArray(global)) return global;
     }
+
+    // 3. Clave legacy ah_* (instalaciones muy antiguas)
+    const legacyKey = LEGACY_STORAGE_KEYS[key];
+    if (legacyKey) {
+      const legacy = await DB.get(legacyKey, undefined);
+      if (legacy !== undefined && !isEmptyArray(legacy)) return legacy;
+    }
+
+    // 4. Escanear TODAS las claves moxi_*_<baseKey> del localStorage
+    //    — recupera datos de cualquier cuenta (ej: moxi_huacareta_products)
+    if (STORAGE_KEYS[key]) {
+      const suffix = `_${key}`;
+      try {
+        for (const k of Object.keys(localStorage)) {
+          if (k !== getScopedStorageKey(key, getCurrentEmpresaId()) && k.startsWith("moxi_") && k.endsWith(suffix)) {
+            const v = await DB.get(k, undefined);
+            if (v !== undefined && !isEmptyArray(v)) return v;
+          }
+        }
+      } catch {}
+    }
+
+    // Si el scoped existe pero es vacío, devolvemos vacío (usuario no tiene items)
+    if (scoped !== undefined) return scoped;
     return fallback;
   }
   // Modo local/legacy: global moxi_* → ah_* → fallback
