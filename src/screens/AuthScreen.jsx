@@ -24,19 +24,25 @@ export function AuthScreen({ config, onLogin, saveConfig }) {
     setErr("");
     try {
       const wt = (p, ms) => Promise.race([p, new Promise((_, r) => setTimeout(() => r(new Error("timeout")), ms))]);
+      // Errores de red del browser (Supabase dormido, sin internet, etc.)
+      const isNetworkErr = (e) =>
+        e.message?.includes("timeout") ||
+        e.message?.includes("Load failed") ||
+        e.message?.includes("Failed to fetch") ||
+        e.message?.toLowerCase?.().includes("network");
 
       // Intento 1 con 20s — cold start de Supabase free tier puede tardar 15s
       let authUser = null;
       try {
         authUser = await wt(authService.login(loginForm.username, loginForm.password), 20000);
       } catch (e1) {
-        if (e1.message?.includes("timeout")) {
+        if (isNetworkErr(e1)) {
           // Intento 2: segundo intento mientras Supabase despierta
-          setErr("Supabase tardó en responder, reintentando…");
+          setErr("Conectando con el servidor, reintentando…");
           try {
             authUser = await wt(authService.login(loginForm.username, loginForm.password), 20000);
           } catch {
-            setErr("No se pudo conectar con Supabase. Si el problema persiste, ve a supabase.com/dashboard y verifica que tu proyecto esté activo (no pausado).");
+            setErr("No se pudo conectar. Verifica tu internet o que el proyecto Supabase esté activo (supabase.com/dashboard).");
             return;
           }
         } else {
@@ -68,9 +74,9 @@ export function AuthScreen({ config, onLogin, saveConfig }) {
         username: loginForm.username,
       });
     } catch (e) {
-      const isTimeout = e.message?.includes("timeout");
-      setErr(isTimeout
-        ? "Supabase no respondió. Ve a supabase.com/dashboard y verifica que tu proyecto no esté pausado."
+      const isNetErr = e.message?.includes("timeout") || e.message?.includes("Load failed") || e.message?.includes("Failed to fetch") || e.message?.toLowerCase?.().includes("network");
+      setErr(isNetErr
+        ? "No se pudo conectar. Verifica tu internet o que el proyecto Supabase no esté pausado."
         : (e.message?.includes("Invalid") || e.message?.includes("credentials") ? "Credenciales incorrectas" : (e.message || "Error al iniciar sesión"))
       );
     } finally {

@@ -145,9 +145,9 @@ export default function App() {
   }, [user?.id]); // eslint-disable-line react-hooks/exhaustive-deps
 
 const init = async () => {
-  // Fallback de seguridad: si onAuthStateChange no dispara INITIAL_SESSION en 1.5s,
+  // Fallback de seguridad: si onAuthStateChange no dispara INITIAL_SESSION en 800ms,
   // desbloqueamos la app manualmente para no quedar en loading infinito.
-  await new Promise(resolve => setTimeout(resolve, 1500));
+  await new Promise(resolve => setTimeout(resolve, 800));
   setSessionChecked(true);
 };
 
