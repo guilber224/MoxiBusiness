@@ -9,19 +9,31 @@ const setLocal = (v, empresaId) => localStorage.setItem(_key(empresaId), JSON.st
 export const ventasService = {
   async getVentas(empresaId) {
     if (!empresaId) return null;
-    // Columnas exactas que usa la app — sin select("*") para evitar payload innecesario.
-    // Límite de 12 meses: reduce drásticamente el volumen de datos transferidos.
-    const since = new Date();
-    since.setFullYear(since.getFullYear() - 1);
-    const { data, error } = await supabase
-      .from("ventas")
-      .select("id,empresa_id,total,paid,debt,items,payments,date,createdAt,customerName,customerId,payment_method,usuario_id")
-      .eq("empresa_id", empresaId)
-      .gte("createdAt", since.toISOString())
-      .order("createdAt", { ascending: false });
-    if (!error) return data || [];
-    console.warn("[getVentas] error:", error.code, error.message);
-    return isSupabaseUUID(empresaId) ? null : getLocal(empresaId);
+    try {
+      // Intento 1: select(*) con filtro de 12 meses — rápido y sin asumir nombres de columnas.
+      const since = new Date();
+      since.setFullYear(since.getFullYear() - 1);
+      const { data, error } = await supabase
+        .from("ventas")
+        .select("*")
+        .eq("empresa_id", empresaId)
+        .gte("createdAt", since.toISOString())
+        .order("createdAt", { ascending: false });
+      if (!error) return data || [];
+
+      // Intento 2: sin filtro de fecha (por si "createdAt" tiene nombre distinto en este proyecto)
+      console.warn("[getVentas] con filtro fecha falló:", error.code, "— reintentando sin filtro");
+      const { data: d2, error: e2 } = await supabase
+        .from("ventas")
+        .select("*")
+        .eq("empresa_id", empresaId);
+      if (!e2) return d2 || [];
+
+      throw new Error(e2.message);
+    } catch (e) {
+      console.warn("[getVentas] error:", e.message);
+      return isSupabaseUUID(empresaId) ? null : getLocal(empresaId);
+    }
   },
 
   async createVenta(venta, user) {

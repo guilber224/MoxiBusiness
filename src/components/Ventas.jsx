@@ -675,17 +675,18 @@ export function Ventas({ D, save, user, config, logAction, onRefreshDashboard, o
       {salesLoading ? (
         <div style={{ textAlign: "center", padding: "40px 16px", color: C.textFaint }}>
           <div style={{ fontSize: 28, marginBottom: 8 }}>⏳</div>
-          <div style={{ fontSize: 13, fontWeight: 500 }}>Cargando ventas desde Supabase…</div>
-          <div style={{ fontSize: 11, marginTop: 4 }}>Esto puede tomar algunos segundos</div>
+          <div style={{ fontSize: 13, fontWeight: 500 }}>Sincronizando ventas…</div>
+          <div style={{ fontSize: 11, marginTop: 4 }}>Conectando con Supabase, espera unos segundos</div>
         </div>
       ) : salesError && sales.length === 0 ? (
         <div style={{ textAlign: "center", padding: "40px 16px" }}>
-          <div style={{ fontSize: 28, marginBottom: 8 }}>⚠️</div>
-          <div style={{ fontSize: 14, fontWeight: 600, marginBottom: 4 }}>No se pudieron cargar las ventas</div>
-          <div style={{ fontSize: 12, color: C.textFaint, marginBottom: 16 }}>Problema de conexión con Supabase. Tus ventas siguen guardadas.</div>
-          {onReloadSales && <button onClick={onReloadSales} style={mkBtn("primary")}>↺ Reintentar</button>}
+          <div style={{ fontSize: 28, marginBottom: 8 }}>🔌</div>
+          <div style={{ fontSize: 14, fontWeight: 600, marginBottom: 6 }}>Sin conexión a Supabase</div>
+          <div style={{ fontSize: 12, color: C.textFaint, marginBottom: 4 }}>El proyecto puede estar <strong>pausado</strong> (plan gratuito pausa cada 7 días sin uso).</div>
+          <div style={{ fontSize: 12, color: C.textFaint, marginBottom: 16 }}>Ve a <strong>supabase.com/dashboard</strong> → tu proyecto → <strong>Resume project</strong>, luego reintenta.</div>
+          {onReloadSales && <button onClick={onReloadSales} style={mkBtn("primary")}>↺ Reintentar conexión</button>}
         </div>
-      ) : filtered.length === 0 ? <Empty icon="🛒" title="Sin ventas" sub={sales.length === 0 ? "Registra tu primera venta" : "Sin resultados"} action={<div style={{ display: "flex", gap: 8, flexWrap: "wrap", justifyContent: "center" }}>{sales.length === 0 && onReloadSales && <button onClick={onReloadSales} style={mkBtn("ghost")}>↺ Recargar ventas</button>}<button onClick={() => setModal("new")} style={mkBtn("primary")}>+ Registrar venta</button></div>} /> :
+      ) : filtered.length === 0 ? <Empty icon="🛒" title="Sin ventas" sub={sales.length === 0 ? "Registra tu primera venta" : "Sin resultados"} action={<div style={{ display: "flex", gap: 8, flexWrap: "wrap", justifyContent: "center" }}>{sales.length === 0 && onReloadSales && <button onClick={onReloadSales} style={mkBtn("ghost")}>↺ Reintentar carga</button>}<button onClick={() => setModal("new")} style={mkBtn("primary")}>+ Registrar venta</button></div>} /> :
         filtered.map(s => (
           <div key={s.id || s.numero} onClick={() => setDetail(s)} style={{ ...card(), cursor: "pointer", marginBottom: 8, display: "flex", justifyContent: "space-between", alignItems: "center", gap: 10 }} onMouseEnter={e => e.currentTarget.style.borderColor = C.borderMid} onMouseLeave={e => e.currentTarget.style.borderColor = C.border}>
             <div style={{ minWidth: 0 }}>
