@@ -1,13 +1,13 @@
 import { clientesService } from "../services/clientesService.js";
 import { productosService } from "../services/productosService.js";
 import { inventarioService } from "../services/inventarioService.js";
-import { gastosService } from "../services/gastosService.js";
-import { movimientosService } from "../services/movimientosService.js";
 import { DEFAULT_CATEGORIES } from "../categories.js";
 import { DEFAULT_CONFIG, DEFAULT_ACTIVITY_LOGS } from "./appStorage.js";
 import { DEFAULT_USERS } from "../seedData.js";
 
-export const SYNC_KEYS = new Set(["customers", "products", "inventory", "expenses", "movements"]);
+// expenses y movements se sincronizan directamente en sus componentes (Caja, GastosPage, Inventario)
+// → sacarlos de SYNC_KEYS elimina los INSERT/DELETE duplicados que generaban errores 409 en Supabase
+export const SYNC_KEYS = new Set(["customers", "products", "inventory"]);
 
 // Para productos, excluye img del diff (base64 puede ser enorme — evita stringify lento)
 function itemKey(key, item) {
@@ -37,8 +37,6 @@ export async function syncDiff(key, prev, next, user) {
       if (key === "customers")  clientesService.createCliente(item, empresa_id).catch(e => _logSyncErr("INSERT", "customers", e));
       if (key === "products")   productosService.upsertProducto({ ...item, empresa_id }).catch(e => _logSyncErr("INSERT", "products", e));
       if (key === "inventory")  inventarioService.upsertStock(item, empresa_id).catch(e => _logSyncErr("INSERT", "inventory", e));
-      if (key === "expenses")   gastosService.createGasto(item, empresa_id).catch(e => _logSyncErr("INSERT", "expenses", e));
-      if (key === "movements")  movimientosService.createMovimiento(item, empresa_id).catch(e => _logSyncErr("INSERT", "movements", e));
     } else if (prevJson !== itemKey(key, item)) {
       // Update (gastos y movimientos son inmutables — solo clientes/productos/inventario)
       if (key === "customers") clientesService.updateCliente(item, empresa_id).catch(e => _logSyncErr("UPDATE", "customers", e));
@@ -52,8 +50,6 @@ export async function syncDiff(key, prev, next, user) {
       // Delete
       if (key === "customers") clientesService.deleteCliente(id, empresa_id).catch(e => _logSyncErr("DELETE", "customers", e));
       if (key === "products")  productosService.deleteProducto(id, empresa_id).catch(e => _logSyncErr("DELETE", "products", e));
-      if (key === "expenses")  gastosService.deleteGasto(id, empresa_id).catch(e => _logSyncErr("DELETE", "expenses", e));
-      // inventory y movements: no se eliminan
     }
   }
 }

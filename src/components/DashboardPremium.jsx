@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo } from "react";
+import { useState, useMemo } from "react";
 import { motion } from "framer-motion";
 import { AreaChart, Area, PieChart, Pie, Cell, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from "recharts";
 import {
@@ -19,87 +19,39 @@ import { KpiPremium } from "./KpiPremium.jsx";
 // ╚══════════════════════════════════════════════════════════════════════╝
 export function DashboardPremium({ D, setTab, user, refreshTrigger = 0 }) {
   const [periodo, setPeriodo] = useState("month");
-  const [kpis, setKpis] = useState(null);
-  const [comparativo, setComparativo] = useState(null);
-  const [topProds, setTopProds] = useState([]);
-  const [topClts, setTopClts] = useState([]);
-  const [syncing, setSyncing] = useState(false);
   const [salesPeriod, setSalesPeriod] = useState("week");
   const isMobile = useIsMobile();
 
-  const { sales = [], customers = [], products = [], inventory = [], expenses = [], categories = [] } = D || {};
+  const { sales = [], customers = [], products = [], inventory = [], expenses = [] } = D || {};
 
-  // Carga analytics desde Supabase — timeout de 6s para no bloquear con "Actualizando..."
-  // Si Supabase tarda más de 6s, se muestran datos locales (cálculo desde sales/expenses).
-  // El cache de 3 minutos en analyticsService hace que la segunda visita sea instantánea.
-  useEffect(() => {
-    if (!user?.empresa_id) return;
-    setSyncing(true);
-    const eid = user.empresa_id;
-    const t = (ms) => new Promise(res => setTimeout(() => res(null), ms));
-    Promise.all([
-      Promise.race([analyticsService.getKPIs(eid, periodo),          t(6000)]),
-      Promise.race([analyticsService.getComparativo(eid, periodo),   t(6000)]),
-      Promise.race([analyticsService.getTopProductos(eid, periodo, 5), t(6000)]),
-      Promise.race([analyticsService.getTopClientes(eid, periodo, 5),  t(6000)]),
-    ]).then(([k, c, tp, tc]) => {
-      setKpis(k);
-      setComparativo(c);
-      setTopProds(Array.isArray(tp) ? tp : []);
-      setTopClts(Array.isArray(tc) ? tc : []);
-    }).catch((err) => { console.warn("[DashboardPremium] analytics error:", err?.message ?? err); }).finally(() => setSyncing(false));
-  }, [user?.empresa_id, periodo, refreshTrigger]); // eslint-disable-line react-hooks/exhaustive-deps
+  // Inventario: mapa O(1) para búsquedas rápidas de stock
+  const stockMap = useMemo(() => Object.fromEntries(inventory.map(i => [i.productId, i.stock || 0])), [inventory]);
+  const lowStock = useMemo(() => products.filter(p => p.minStock > 0 && (stockMap[p.id] || 0) <= p.minStock), [products, stockMap]);
 
-  // Computaciones locales como fallback
-  const getStock = id => (inventory.find(i => i.productId === id) || {}).stock || 0;
-  const lowStock = useMemo(() => products.filter(p => p.minStock > 0 && getStock(p.id) <= p.minStock), [products, inventory]); // eslint-disable-line react-hooks/exhaustive-deps
-  const debtClients = useMemo(() =>
-    customers.map(c => ({ ...c, debt: sales.filter(s => s.customerId === c.id).reduce((a, s) => a + s.debt, 0) }))
-      .filter(c => c.debt > 0).sort((a, b) => b.debt - a.debt),
-    [customers, sales]);
+  // debtClients: O(sales + customers) con Map — antes era O(customers × sales × 3)
+  const debtClients = useMemo(() => {
+    const debtMap = {};
+    sales.forEach(s => { if (s.customerId && s.debt > 0) debtMap[s.customerId] = (debtMap[s.customerId] || 0) + s.debt; });
+    return customers.map(c => ({ ...c, debt: debtMap[c.id] || 0 }))
+      .filter(c => c.debt > 0).sort((a, b) => b.debt - a.debt);
+  }, [customers, sales]);
+
   const recent = useMemo(() => [...sales].sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt)).slice(0, 5), [sales]);
 
-  // Métricas: Supabase si disponible, fallback local
-  const totalVentas    = kpis?.totalVentas    ?? sales.reduce((a, s) => a + s.total, 0);
-  const totalCobrado   = kpis?.totalCobrado   ?? sales.reduce((a, s) => a + s.paid, 0);
-  const totalDeuda     = kpis?.totalDeuda     ?? sales.reduce((a, s) => a + s.debt, 0);
-  const totalGastos    = kpis?.totalGastos    ?? expenses.filter(e => e.type === "gasto").reduce((a, e) => a + e.amount, 0);
-  const ticketPromedio = kpis?.ticketPromedio ?? 0;
-  const tasaCobro      = kpis?.tasaCobro      ?? (totalVentas > 0 ? (totalCobrado / totalVentas) * 100 : 0);
-  const balance        = kpis?.balance        ?? (totalCobrado - totalGastos);
-  const numTx          = kpis?.numTransacciones ?? sales.length;
-  const cambio         = comparativo?.cambio  ?? null;
+  // KPIs calculados en memoria — sin queries a Supabase, reactivos al estado en tiempo real
+  const kpis        = useMemo(() => analyticsService.computeKPIs(sales, expenses, periodo),       [sales, expenses, periodo]);
+  const comparativo = useMemo(() => analyticsService.computeComparativo(sales, periodo),           [sales, periodo]);
+  const displayTopProds = useMemo(() => analyticsService.computeTopProductos(sales, periodo, 5),  [sales, periodo]);
 
-  // Top productos locales (siempre calculados — se usan solo si analytics no responde)
-  const localTopProds = useMemo(() => {
-    const m = {};
-    sales.forEach(s => s.items.forEach(it => {
-      if (!m[it.productId]) m[it.productId] = { name: products.find(p => p.id === it.productId)?.name || it.name || it.productId, ingreso: 0, unidades: 0 };
-      m[it.productId].ingreso  += n(it.subtotal ?? it.sub ?? 0);
-      m[it.productId].unidades += n(it.qty ?? 0);
-    }));
-    return Object.values(m).sort((a, b) => b.ingreso - a.ingreso).slice(0, 5);
-  }, [sales, products]);
-  const displayTopProds = topProds.length > 0 ? topProds : localTopProds;
-
-  // Top clientes locales (siempre calculados — se usan solo si analytics no responde)
-  const localTopClts = useMemo(() =>
-    customers.map(c => ({
-      name: c.name,
-      total: sales.filter(s => s.customerId === c.id).reduce((a, s) => a + s.total, 0),
-      compras: sales.filter(s => s.customerId === c.id).length,
-      deuda: sales.filter(s => s.customerId === c.id).reduce((a, s) => a + s.debt, 0),
-    })).filter(c => c.total > 0).sort((a, b) => b.total - a.total).slice(0, 5),
-    [customers, sales]);
-  const displayTopClts = topClts.length > 0 ? topClts : localTopClts;
+  const { totalVentas, totalCobrado, totalDeuda, totalGastos, ticketPromedio, tasaCobro, balance, numTransacciones: numTx } = kpis;
+  const cambio = comparativo.cambio;
 
   const periodos = PERIOD_OPTIONS.filter(([p]) => p !== "5y");
-  const modeColor = user?.empresa_id ? (syncing ? C.amber : C.green) : C.textFaint;
-  const modeLabel = user?.empresa_id ? (syncing ? "Actualizando..." : "● Supabase") : "● Local";
+  const modeColor = user?.empresa_id ? C.green : C.textFaint;
+  const modeLabel = user?.empresa_id ? "● Tiempo real" : "● Local";
 
-  // Chart data for the sales panel (uses salesPeriod, not periodo)
   const salesChartData = useMemo(() => buildChart(sales, salesPeriod), [sales, salesPeriod]);
-  const avgSale = sales.length > 0 ? totalVentas / sales.length : 0;
+  const avgSale = ticketPromedio;
 
   // Donut data
   const donutData = [
@@ -133,11 +85,11 @@ export function DashboardPremium({ D, setTab, user, refreshTrigger = 0 }) {
       {/* ── KPI Cards ── */}
       <div style={{ display: "grid", gridTemplateColumns: isMobile ? "repeat(2,1fr)" : "repeat(auto-fit, minmax(160px, 1fr))", gap: 12, marginBottom: 20 }}>
         <KpiPremium index={0} label="Clientes" value={customers.length} sub={`${products.length} productos`} color={C.brandLight} icon={Users} loading={false} />
-        <KpiPremium index={1} label="Ventas del periodo" value={Bs(totalVentas)} sub={`${numTx} transacciones`} color={C.green} icon={ShoppingCart} trend={cambio} loading={syncing && !kpis} />
-        <KpiPremium index={2} label="Total cobrado" value={Bs(totalCobrado)} sub={`${Math.round(tasaCobro)}% tasa cobro`} color={C.warning} icon={Wallet} loading={syncing && !kpis} />
-        <KpiPremium index={3} label="Deuda pendiente" value={Bs(totalDeuda)} sub={`${debtClients.length} pendientes`} color={totalDeuda > 0 ? C.danger : C.green} icon={CreditCard} loading={syncing && !kpis} />
-        <KpiPremium index={4} label="Balance neto" value={Bs(balance)} sub={`Gastos: ${Bs(totalGastos)}`} color={balance >= 0 ? C.green : C.danger} icon={TrendingUp} loading={syncing && !kpis} />
-        <KpiPremium index={5} label="Ticket promedio" value={Bs(ticketPromedio || avgSale)} sub="por transacción" color={C.brand} icon={BarChart2} loading={syncing && !kpis} />
+        <KpiPremium index={1} label="Ventas del periodo" value={Bs(totalVentas)} sub={`${numTx} transacciones`} color={C.green} icon={ShoppingCart} trend={cambio} loading={false} />
+        <KpiPremium index={2} label="Total cobrado" value={Bs(totalCobrado)} sub={`${Math.round(tasaCobro)}% tasa cobro`} color={C.warning} icon={Wallet} loading={false} />
+        <KpiPremium index={3} label="Deuda pendiente" value={Bs(totalDeuda)} sub={`${debtClients.length} pendientes`} color={totalDeuda > 0 ? C.danger : C.green} icon={CreditCard} loading={false} />
+        <KpiPremium index={4} label="Balance neto" value={Bs(balance)} sub={`Gastos: ${Bs(totalGastos)}`} color={balance >= 0 ? C.green : C.danger} icon={TrendingUp} loading={false} />
+        <KpiPremium index={5} label="Ticket promedio" value={Bs(ticketPromedio)} sub="por transacción" color={C.brand} icon={BarChart2} loading={false} />
       </div>
 
       {/* ── 3-panel row: Chart / Top Productos / Donut ── */}
