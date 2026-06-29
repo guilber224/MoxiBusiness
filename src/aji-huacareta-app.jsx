@@ -41,10 +41,83 @@ import { SuperAdminPanel } from "./components/SuperAdminPanel.jsx";
 import { Topbar } from "./components/Topbar.jsx";
 import { SuscripcionVencida } from "./screens/SuscripcionVencida.jsx";
 import { suscripcionService } from "./services/suscripcionService.js";
-import { loadStoredValue, persistValue, buildActivityEntry, DEFAULT_CONFIG, DEFAULT_ACTIVITY_LOGS } from "./utils/appStorage.js";
+import { loadStoredValue, persistValue, cacheSupabaseData, buildActivityEntry, DEFAULT_CONFIG, DEFAULT_ACTIVITY_LOGS } from "./utils/appStorage.js";
 import { syncDiff, SYNC_KEYS, createEmptyAppState } from "./utils/syncDiff.js";
 import { invalidateAnalyticsCache } from "./services/analyticsService.js";
 import { PRODUCTS0, FORMULAS0, CUSTOMERS0, DEFAULT_USERS } from "./seedData.js";
+
+// Lee datos de claves globales moxi_* o claves legacy ah_* cuando las claves scoped están vacías.
+const getLocalFallbackData = (primaryKey, legacyKey = null) => {
+  for (const k of [primaryKey, legacyKey].filter(Boolean)) {
+    try {
+      const raw = localStorage.getItem(k);
+      const data = raw ? JSON.parse(raw) : null;
+      if (Array.isArray(data) && data.length > 0) return data;
+    } catch {}
+  }
+  return [];
+};
+
+// Sube datos locales a Supabase cuando las tablas están vacías al iniciar sesión.
+// ignoreDuplicates: true → nunca sobreescribe filas existentes en Supabase.
+const uploadLocalToSupabase = async (empresaId, entities) => {
+  const upsert = async (table, rows, conflict = "id") => {
+    if (!rows.length) return;
+    for (let i = 0; i < rows.length; i += 150) {
+      const { error } = await supabase.from(table).upsert(rows.slice(i, i + 150), { onConflict: conflict, ignoreDuplicates: true });
+      if (error) console.warn(`[migrate] ${table}:`, error.message);
+    }
+  };
+  const strip = ({ _localOnly, ...r }) => r;
+  const result = {};
+
+  if (entities.customers) {
+    const data = getLocalFallbackData("moxi_customers", "ah_customers");
+    if (data.length) {
+      await upsert("clientes", data.filter(c => c?.id).map(c => ({ ...strip(c), empresa_id: empresaId, nombre: c.name || c.nombre || "" })));
+      result.customers = data;
+    }
+  }
+  if (entities.products) {
+    const data = getLocalFallbackData("moxi_products", "ah_products3");
+    if (data.length) {
+      await upsert("productos", data.filter(p => p?.id).map(p => ({ ...strip(p), empresa_id: empresaId, nombre: p.name || p.nombre || "" })));
+      result.products = data;
+    }
+  }
+  if (entities.expenses) {
+    const data = getLocalFallbackData("moxi_expenses", "ah_expenses");
+    if (data.length) {
+      await upsert("gastos", data.filter(g => g?.id).map(g => ({ ...strip(g), empresa_id: empresaId, descripcion: g.description || g.descripcion || "", monto: g.amount ?? g.monto ?? 0 })));
+      result.expenses = data;
+    }
+  }
+  if (entities.movements) {
+    const data = getLocalFallbackData("moxi_movements", "ah_movements");
+    if (data.length) {
+      await upsert("movimientos", data.filter(m => m?.id).map(m => ({ ...strip(m), empresa_id: empresaId })));
+      result.movements = data;
+    }
+  }
+  if (entities.inventory) {
+    const data = getLocalFallbackData("moxi_inventory", "ah_inventory3");
+    if (data.length) {
+      await upsert("inventario", data.filter(i => i?.productId).map(i => ({ ...strip(i), empresa_id: empresaId })), "productId");
+      result.inventory = data;
+    }
+  }
+  if (entities.pedidos) {
+    const data = getLocalFallbackData("moxi_pedidos");
+    if (data.length) {
+      await upsert("pedidos", data.filter(p => p?.id).map(p => ({ ...strip(p), empresa_id: empresaId })));
+      result.pedidos = data;
+    }
+  }
+
+  const count = Object.values(result).reduce((s, a) => s + a.length, 0);
+  if (count) console.log(`[migrate] ${count} registros subidos a Supabase`);
+  return result;
+};
 
 export default function App() {
   const [user,setUser]=useState(null);
@@ -55,7 +128,6 @@ export default function App() {
   const [recoveryMode,setRecoveryMode]=useState(false);
   const [sessionChecked,setSessionChecked]=useState(false);
   const [isRestoringSession,setIsRestoringSession]=useState(false);
-  const [isLoadingScope,setIsLoadingScope]=useState(false);
   const [rtRefreshTrigger,setRtRefreshTrigger]=useState(0);
   const [suscripcion,setSuscripcion]=useState(null);
   const [waConfig,setWaConfig]=useState("+59163506018");
@@ -73,17 +145,11 @@ export default function App() {
   useEffect(() => { if (data) dataRef.current = data; }, [data]);
   useEffect(() => { setMountedTabs(prev => { if (prev.has(tab)) return prev; const next = new Set(prev); next.add(tab); return next; }); }, [tab]);
 
-  // loginUser: actualiza userRef Y empresa scope SÍNCRONAMENTE antes del render.
-  // Solo bloquea la UI (isLoadingScope) si no hay datos en caché para esta empresa.
-  // Con caché: el usuario ve sus datos inmediatamente y Supabase actualiza en silencio.
-  // Sin caché (primer login): bloquea hasta que Supabase responda.
   const loginUser = useCallback((newUser) => {
     userRef.current = newUser;
     if (newUser?.empresa_id) {
       setCurrentEmpresaId(newUser.empresa_id);
       saveLastEmpresaId(newUser.empresa_id);
-      const hasCached = Boolean(dataRef.current?.customers?.length || dataRef.current?.products?.length || dataRef.current?.expenses?.length);
-      if (!hasCached) setIsLoadingScope(true);
     }
     setUser(newUser);
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
@@ -107,22 +173,20 @@ export default function App() {
     setData(createEmptyAppState());
     setSuscripcion(null);
     setTab("dashboard");
-    setIsLoadingScope(false);
     setSidebarOpen(false);
     try { await supabase.removeAllChannels(); } catch {}
     try { await supabase.auth.signOut(); } catch {}
   };
 
-  // Verificar suscripción después de que el scope se haya hidratado
   useEffect(() => {
-    if (!user?.empresa_id || isLoadingScope || user?.role === "superadmin") return;
+    if (!user?.empresa_id || user?.role === "superadmin") return;
     suscripcionService.getOCrearTrial(user.empresa_id, dataRef.current?.config?.businessName || "")
       .then(sus => setSuscripcion(sus))
       .catch(() => {});
     suscripcionService.getConfig()
       .then(cfg => setWaConfig(cfg.whatsapp_soporte || "+59163506018"))
       .catch(() => {});
-  }, [user?.empresa_id, isLoadingScope, user?.role]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [user?.empresa_id, user?.role]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Reintentar onboarding: recarga perfil desde Supabase.
   // Si sigue sin empresa_id, cierra sesión para que el usuario re-registre su empresa.
@@ -151,9 +215,9 @@ export default function App() {
   }, [user?.id]); // eslint-disable-line react-hooks/exhaustive-deps
 
 const init = async () => {
-  // Fallback de seguridad: si onAuthStateChange no dispara INITIAL_SESSION en 800ms,
+  // Fallback de seguridad: si onAuthStateChange no dispara INITIAL_SESSION en 500ms,
   // desbloqueamos la app manualmente para no quedar en loading infinito.
-  await new Promise(resolve => setTimeout(resolve, 800));
+  await new Promise(resolve => setTimeout(resolve, 500));
   setSessionChecked(true);
 };
 
@@ -257,8 +321,6 @@ const init = async () => {
             if (newUser.empresa_id) {
               setCurrentEmpresaId(newUser.empresa_id);
               saveLastEmpresaId(newUser.empresa_id);
-              const hasCached = Boolean(dataRef.current?.customers?.length || dataRef.current?.products?.length || dataRef.current?.expenses?.length);
-              if (!hasCached) setIsLoadingScope(true);
             }
             userRef.current = newUser;
             setUser(newUser);
@@ -287,73 +349,143 @@ const init = async () => {
         dataRef.current   = null;
         setUser(null);
         setData(createEmptyAppState());
-        setIsLoadingScope(false);
         setRecoveryMode(false);
       }
     });
     return () => subscription.unsubscribe();
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // Después de login, sincroniza todas las entidades con Supabase en paralelo.
-  // Si hay datos en localStorage (usuario recurrente), el ERP ya está visible y esta
-  // función solo actualiza los valores silenciosamente cuando Supabase responde.
-  // Si no hay datos en caché (primer login), isLoadingScope ya fue activado en loginUser.
   useEffect(()=>{
     if (!user?.empresa_id) return;
     setSalesLoading(true);
     setSalesError(false);
     const eid = user.empresa_id;
+    let cancelled = false;
+    let retryTimer = null;
 
-    // T(): timeout de 7s — no bloquea la UI (cache-first), pero espera suficiente
-    // para recibir datos de Supabase aunque esté en cold start.
-    const T = (p) => Promise.race([p, new Promise(r => setTimeout(() => r(null), 7000))]);
-
-    // Ventas arranca EN PARALELO con los datos críticos.
-    const ventasRace = Promise.race([
-      ventasService.getVentas(eid),
-      new Promise(r => setTimeout(() => r(null), 8000)),
-    ]);
-
-    // Datos críticos en paralelo — máximo 7 segundos de espera total
-    Promise.all([
-      T(clientesService.getClientes(eid)),
-      T(productosService.getProductos(eid)),
-      T(inventarioService.getInventario(eid)),
-      T(gastosService.getGastos(eid)),
-      T(movimientosService.getMovimientos(eid)),
-      T(loadStoredValue("config", null)),
-      T(pedidosService.getPedidos(eid)),
-    ]).then(([supaClientes, supaProductos, supaInventario, supaGastos, supaMovimientos, scopedConfig, supaPedidos]) => {
+    const applyData = (supaClientes, supaProductos, supaInventario, supaGastos, supaMovimientos, scopedConfig, supaPedidos) => {
+      if (cancelled) return;
       setData(d => {
         if (!d) return d;
         const cats = d.categories || DEFAULT_CATEGORIES;
         const next = { ...d };
-        if (Array.isArray(supaClientes))    next.customers  = normalizeCustomers(supaClientes);
-        if (Array.isArray(supaProductos))   next.products   = sanitizeProducts(supaProductos, cats);
-        if (Array.isArray(supaInventario))  next.inventory  = supaInventario;
-        if (Array.isArray(supaGastos))      next.expenses   = supaGastos;
-        if (Array.isArray(supaMovimientos)) next.movements  = supaMovimientos;
-        if (Array.isArray(supaPedidos))     next.pedidos    = supaPedidos;
-        if (scopedConfig)                   next.config     = scopedConfig;
+        // null = Supabase falló → conservar caché; [] = tabla vacía → actualizar
+        if (Array.isArray(supaClientes))    { next.customers  = normalizeCustomers(supaClientes);      cacheSupabaseData("customers",  supaClientes,    eid); }
+        if (Array.isArray(supaProductos))   { next.products   = sanitizeProducts(supaProductos, cats); cacheSupabaseData("products",   supaProductos,   eid); }
+        if (Array.isArray(supaInventario))  { next.inventory  = supaInventario;                        cacheSupabaseData("inventory",  supaInventario,  eid); }
+        if (Array.isArray(supaGastos))      { next.expenses   = supaGastos;                            cacheSupabaseData("expenses",   supaGastos,      eid); }
+        if (Array.isArray(supaMovimientos)) { next.movements  = supaMovimientos;                       cacheSupabaseData("movements",  supaMovimientos, eid); }
+        if (Array.isArray(supaPedidos))     { next.pedidos    = supaPedidos;                           cacheSupabaseData("pedidos",    supaPedidos,     eid); }
+        if (scopedConfig)                   next.config       = scopedConfig;
         return next;
       });
       if (scopedConfig?.currency) applyCurrencyCode(scopedConfig.currency);
-    }).catch(err => { console.warn("[App] hydration failed:", err?.message ?? err); })
-    .finally(() => {
-      setIsLoadingScope(false); // UI desbloqueada — ventas puede estar ya resuelta o llegar pronto
+    };
 
-      // Ventas ya estaba cargando desde el inicio — sólo esperamos el resultado
-      ventasRace
-        .then(supaVentas => {
-          if (Array.isArray(supaVentas)) {
-            setData(d => d ? { ...d, sales: normalizeSales(supaVentas) } : d);
-          } else {
-            setSalesError(true);
+    const doFetch = (isRetry) => {
+      const T = (p) => Promise.race([p, new Promise(r => setTimeout(() => r(null), isRetry ? 8000 : 5000))]);
+
+      const ventasRace = isRetry ? null : Promise.race([
+        ventasService.getVentas(eid),
+        new Promise(r => setTimeout(() => r(null), 6000)),
+      ]);
+
+      Promise.all([
+        T(clientesService.getClientes(eid)),
+        T(productosService.getProductos(eid)),
+        T(inventarioService.getInventario(eid)),
+        T(gastosService.getGastos(eid)),
+        T(movimientosService.getMovimientos(eid)),
+        T(loadStoredValue("config", null)),
+        T(pedidosService.getPedidos(eid)),
+        isRetry ? T(ventasService.getVentas(eid)) : Promise.resolve(null),
+      ]).then(([supaClientes, supaProductos, supaInventario, supaGastos, supaMovimientos, scopedConfig, supaPedidos, retryVentas]) => {
+        applyData(supaClientes, supaProductos, supaInventario, supaGastos, supaMovimientos, scopedConfig, supaPedidos);
+
+        // Ventas del retry aplicadas directamente
+        if (isRetry) {
+          if (Array.isArray(retryVentas) && retryVentas.length > 0) {
+            setData(d => d ? { ...d, sales: normalizeSales(retryVentas) } : d);
+            cacheSupabaseData("sales", retryVentas, eid);
           }
-        })
-        .catch(e => { console.warn("[App] getVentas failed:", e?.message); setSalesError(true); })
-        .finally(() => setSalesLoading(false));
-    });
+          if (!cancelled) setSalesLoading(false);
+        }
+
+        // Si Supabase devolvió tablas vacías, intentar migrar datos locales a Supabase
+        const emptyEntities = {
+          customers: Array.isArray(supaClientes)    && supaClientes.length    === 0,
+          products:  Array.isArray(supaProductos)   && supaProductos.length   === 0,
+          expenses:  Array.isArray(supaGastos)      && supaGastos.length      === 0,
+          movements: Array.isArray(supaMovimientos) && supaMovimientos.length  === 0,
+          inventory: Array.isArray(supaInventario)  && supaInventario.length   === 0,
+          pedidos:   Array.isArray(supaPedidos)     && supaPedidos.length      === 0,
+        };
+        if (Object.values(emptyEntities).some(Boolean)) {
+          uploadLocalToSupabase(eid, emptyEntities).then(migrated => {
+            if (cancelled || !Object.keys(migrated).length) return;
+            setData(d => {
+              if (!d) return d;
+              const cats = d.categories || DEFAULT_CATEGORIES;
+              const next = { ...d };
+              if (migrated.customers?.length) { next.customers = normalizeCustomers(migrated.customers); cacheSupabaseData("customers", migrated.customers, eid); }
+              if (migrated.products?.length)  { next.products  = sanitizeProducts(migrated.products, cats); cacheSupabaseData("products", migrated.products, eid); }
+              if (migrated.expenses?.length)  { next.expenses  = migrated.expenses;  cacheSupabaseData("expenses",  migrated.expenses,  eid); }
+              if (migrated.movements?.length) { next.movements = migrated.movements; cacheSupabaseData("movements", migrated.movements, eid); }
+              if (migrated.inventory?.length) { next.inventory = migrated.inventory; cacheSupabaseData("inventory", migrated.inventory, eid); }
+              if (migrated.pedidos?.length)   { next.pedidos   = migrated.pedidos;   cacheSupabaseData("pedidos",   migrated.pedidos,   eid); }
+              return next;
+            });
+          }).catch(e => console.warn("[migrate] error:", e.message));
+        }
+
+        // Retry único si todo Supabase vino vacío — tolera cold start / RLS transitoria
+        const allSupabaseEmpty =
+          (Array.isArray(supaClientes) ? supaClientes.length === 0 : true) &&
+          (Array.isArray(supaProductos) ? supaProductos.length === 0 : true) &&
+          (Array.isArray(supaGastos) ? supaGastos.length === 0 : true);
+        if (!isRetry && allSupabaseEmpty && !cancelled) {
+          console.warn("[App] Supabase devolvió todo vacío — reintentando en 5s...");
+          retryTimer = setTimeout(() => doFetch(true), 5000);
+        }
+      }).catch(err => { if (!cancelled) console.warn("[App] hydration failed:", err?.message ?? err); })
+      .finally(() => {
+        if (isRetry || cancelled) return;
+        ventasRace
+          .then(supaVentas => {
+            if (cancelled) return;
+            if (Array.isArray(supaVentas)) {
+              if (supaVentas.length === 0) {
+                const localSales = getLocalFallbackData("moxi_sales", "ah_sales");
+                if (localSales.length > 0) {
+                  const rows = localSales.filter(v => v?.id).map(({ _localOnly, ...v }) => ({
+                    ...v, empresa_id: eid, createdAt: v.createdAt || v.date || new Date().toISOString()
+                  }));
+                  supabase.from("ventas").upsert(rows.slice(0, 150), { onConflict: "id", ignoreDuplicates: true }).then(({ error }) => {
+                    if (error) console.warn("[migrate] ventas:", error.message);
+                    if (!cancelled) {
+                      setData(d => d ? { ...d, sales: normalizeSales(localSales) } : d);
+                      cacheSupabaseData("sales", localSales, eid);
+                    }
+                  });
+                }
+              } else {
+                setData(d => d ? { ...d, sales: normalizeSales(supaVentas) } : d);
+                cacheSupabaseData("sales", supaVentas, eid);
+              }
+            } else {
+              setSalesError(true);
+            }
+          })
+          .catch(e => { if (!cancelled) { console.warn("[App] getVentas failed:", e?.message); setSalesError(true); } })
+          .finally(() => { if (!cancelled) setSalesLoading(false); });
+      });
+    };
+
+    doFetch(false);
+    return () => {
+      cancelled = true;
+      if (retryTimer) clearTimeout(retryTimer);
+    };
   }, [user?.empresa_id]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Realtime: sincroniza ventas, productos, inventario, clientes y gastos entre pestañas/dispositivos.
@@ -458,6 +590,7 @@ const init = async () => {
       const supaVentas = await ventasService.getVentas(user.empresa_id);
       if (Array.isArray(supaVentas)) {
         setData(d => ({ ...d, sales: normalizeSales(supaVentas) }));
+        cacheSupabaseData("sales", supaVentas, user.empresa_id);
       } else {
         setSalesError(true);
       }
@@ -491,7 +624,7 @@ const init = async () => {
       <div style={{width:140,height:2,background:"rgba(255,255,255,0.08)",borderRadius:2,overflow:"hidden"}}>
         <div style={{height:"100%",width:"40%",background:"linear-gradient(90deg,#111E7B,#22C5FE)",borderRadius:2,animation:"moxiLoad 1.2s ease-in-out infinite alternate"}}/>
       </div>
-      <div style={{fontSize:11,color:"rgba(255,255,255,0.22)",marginTop:4}}>Máx. 7 segundos — desbloqueo automático si Supabase tarda</div>
+      <div style={{fontSize:11,color:"rgba(255,255,255,0.22)",marginTop:4}}>Conectando…</div>
     </div>
   );
   if(!data || !sessionChecked) return loadingScreen;
@@ -502,9 +635,6 @@ const init = async () => {
   // Usuario Supabase sin empresa_id: bloquear acceso total al ERP.
   // No renderizar dashboard, ventas, clientes ni ningún módulo.
   if(isSupabaseUser(user) && !user.empresa_id) return <OnboardingIncompleteScreen onRetry={handleRetryOnboarding} onLogout={handleLogout}/>;
-  // Bloquear render del ERP hasta que Supabase haya hidratado los datos del scope actual.
-  // Sin esto, el dashboard muestra KPIs vacíos ($0, 0 clientes) durante 1-3 segundos.
-  if(isLoadingScope) return loadingScreen;
   // Suscripción vencida: bloquear acceso al ERP (excepto superadmin)
   if(user?.role !== "superadmin" && suscripcion && suscripcionService.estaVencida(suscripcion)) {
     return <SuscripcionVencida suscripcion={suscripcion} whatsapp={waConfig} onLogout={handleLogout} />;

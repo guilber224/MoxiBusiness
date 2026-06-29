@@ -48,7 +48,7 @@ export function DashboardPremium({ D, setTab, user, refreshTrigger = 0 }) {
 
   const periodos = PERIOD_OPTIONS.filter(([p]) => p !== "5y");
   const modeColor = user?.empresa_id ? C.green : C.textFaint;
-  const modeLabel = user?.empresa_id ? "● Tiempo real" : "● Local";
+  const modeLabel = user?.empresa_id ? "● Supabase" : "● Local";
 
   const salesChartData = useMemo(() => buildChart(sales, salesPeriod), [sales, salesPeriod]);
   const avgSale = ticketPromedio;
