@@ -70,14 +70,16 @@ export default function App() {
   useEffect(() => { if (data) dataRef.current = data; }, [data]);
 
   // loginUser: actualiza userRef Y empresa scope SÍNCRONAMENTE antes del render.
-  // También bloquea el ERP (isLoadingScope) ANTES del render para evitar el frame vacío
-  // entre "user seteado" y "efecto de hidratación ejecutado".
+  // Solo bloquea la UI (isLoadingScope) si no hay datos en caché para esta empresa.
+  // Con caché: el usuario ve sus datos inmediatamente y Supabase actualiza en silencio.
+  // Sin caché (primer login): bloquea hasta que Supabase responda.
   const loginUser = useCallback((newUser) => {
     userRef.current = newUser;
     if (newUser?.empresa_id) {
       setCurrentEmpresaId(newUser.empresa_id);
       saveLastEmpresaId(newUser.empresa_id);
-      setIsLoadingScope(true);
+      const hasCached = Boolean(dataRef.current?.customers?.length || dataRef.current?.products?.length || dataRef.current?.expenses?.length);
+      if (!hasCached) setIsLoadingScope(true);
     }
     setUser(newUser);
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
@@ -251,7 +253,8 @@ const init = async () => {
             if (newUser.empresa_id) {
               setCurrentEmpresaId(newUser.empresa_id);
               saveLastEmpresaId(newUser.empresa_id);
-              setIsLoadingScope(true);
+              const hasCached = Boolean(dataRef.current?.customers?.length || dataRef.current?.products?.length || dataRef.current?.expenses?.length);
+              if (!hasCached) setIsLoadingScope(true);
             }
             userRef.current = newUser;
             setUser(newUser);
@@ -287,30 +290,23 @@ const init = async () => {
     return () => subscription.unsubscribe();
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // Después de login, cargar todas las entidades desde Supabase en paralelo.
-  // Ventas arranca al mismo tiempo que el resto — ya no espera que los datos críticos terminen.
-  // Con la query optimizada (columnas específicas + últimos 12 meses), es tan rápida como gastos.
+  // Después de login, sincroniza todas las entidades con Supabase en paralelo.
+  // Si hay datos en localStorage (usuario recurrente), el ERP ya está visible y esta
+  // función solo actualiza los valores silenciosamente cuando Supabase responde.
+  // Si no hay datos en caché (primer login), isLoadingScope ya fue activado en loginUser.
   useEffect(()=>{
     if (!user?.empresa_id) return;
-    setIsLoadingScope(true);
     setSalesLoading(true);
     setSalesError(false);
-    // Limpiar arrays síncronamente — ningún frame con datos de empresa anterior
-    setData(d => d ? {
-      ...d,
-      sales: [], customers: [], products: [],
-      inventory: [], expenses: [], movements: [],
-    } : d);
     const eid = user.empresa_id;
 
-    // T(): garantiza que ninguna query bloquee más de 7 segundos.
-    const T = (p) => Promise.race([p, new Promise(r => setTimeout(() => r(null), 7000))]);
+    // T(): timeout de 4s — si Supabase no responde, resuelve null y se ignora.
+    const T = (p) => Promise.race([p, new Promise(r => setTimeout(() => r(null), 4000))]);
 
-    // Ventas arranca EN PARALELO con los datos críticos — no espera al Paso 1.
-    // 8s timeout propio para no dejar el spinner indefinido.
+    // Ventas arranca EN PARALELO con los datos críticos.
     const ventasRace = Promise.race([
       ventasService.getVentas(eid),
-      new Promise(r => setTimeout(() => r(null), 8000)),
+      new Promise(r => setTimeout(() => r(null), 5000)),
     ]);
 
     // Datos críticos en paralelo — máximo 7 segundos de espera total
