@@ -61,6 +61,9 @@ export default function App() {
   const [waConfig,setWaConfig]=useState("+59163506018");
   const [salesLoading,setSalesLoading]=useState(false);
   const [salesError,setSalesError]=useState(false);
+  // mountedTabs: una vez visitado un tab, se queda montado (display:none cuando inactivo).
+  // Evita desmontar/remontar componentes al navegar — no hay re-fetch, no hay re-cómputo.
+  const [mountedTabs,setMountedTabs]=useState(()=>new Set(["dashboard"]));
   const isMobile=useIsMobile();
 
   // Refs para acceder a user/data actuales dentro de callbacks sin stale closures
@@ -68,6 +71,7 @@ export default function App() {
   const dataRef = useRef(null);
   useEffect(() => { userRef.current = user; }, [user]);
   useEffect(() => { if (data) dataRef.current = data; }, [data]);
+  useEffect(() => { setMountedTabs(prev => { if (prev.has(tab)) return prev; const next = new Set(prev); next.add(tab); return next; }); }, [tab]);
 
   // loginUser: actualiza userRef Y empresa scope SÍNCRONAMENTE antes del render.
   // Solo bloquea la UI (isLoadingScope) si no hay datos en caché para esta empresa.
@@ -300,13 +304,14 @@ const init = async () => {
     setSalesError(false);
     const eid = user.empresa_id;
 
-    // T(): timeout de 4s — si Supabase no responde, resuelve null y se ignora.
-    const T = (p) => Promise.race([p, new Promise(r => setTimeout(() => r(null), 4000))]);
+    // T(): timeout de 7s — no bloquea la UI (cache-first), pero espera suficiente
+    // para recibir datos de Supabase aunque esté en cold start.
+    const T = (p) => Promise.race([p, new Promise(r => setTimeout(() => r(null), 7000))]);
 
     // Ventas arranca EN PARALELO con los datos críticos.
     const ventasRace = Promise.race([
       ventasService.getVentas(eid),
-      new Promise(r => setTimeout(() => r(null), 5000)),
+      new Promise(r => setTimeout(() => r(null), 8000)),
     ]);
 
     // Datos críticos en paralelo — máximo 7 segundos de espera total
@@ -552,24 +557,27 @@ const init = async () => {
             </div>
           )}
 
-          {/* ── MAIN CONTENT ── */}
+          {/* ── MAIN CONTENT ──
+               Lazy-mount + display:none: cada tab se monta la primera vez que se visita
+               y permanece en memoria. Navegar de vuelta es INSTANTÁNEO — sin re-fetch,
+               sin re-cómputo de useMemo, sin llamadas al servidor. */}
           <main style={{ flex: 1, overflowY: "auto", padding: isMobile ? "14px 14px 80px" : "28px 32px", minWidth: 0 }}>
             <div style={{ maxWidth: 1400, margin: "0 auto" }}>
-              {tab === "dashboard"   && <DashboardPremium D={data} setTab={setTab} user={user} refreshTrigger={rtRefreshTrigger} />}
-              {tab === "clientes"    && <Clientes D={data} save={save} user={user} />}
-              {tab === "ventas"      && <Ventas D={data} save={save} user={user} config={data.config} logAction={logAction} onRefreshDashboard={()=>{ invalidateAnalyticsCache(); setRtRefreshTrigger(t=>t+1); }} onReloadSales={reloadSales} salesLoading={salesLoading} salesError={salesError} />}
-              {tab === "pedidos"     && <Pedidos D={data} save={save} user={user} config={data.config} logAction={logAction} onRefreshDashboard={()=>setRtRefreshTrigger(t=>t+1)} />}
-              {tab === "deudas"      && <Deudas D={data} save={save} user={user} logAction={logAction} />}
-              {tab === "productos"   && <Productos D={data} save={save} user={user} />}
-              {tab === "inventario"  && <Inventario D={data} save={save} user={user} />}
-              {tab === "produccion"  && <Produccion D={data} save={save} user={user} logAction={logAction} />}
-              {tab === "proveedores" && <Proveedores D={data} save={save} />}
-              {tab === "caja"        && <Caja D={data} save={save} user={user} logAction={logAction} onRefreshDashboard={()=>setRtRefreshTrigger(t=>t+1)} />}
-              {tab === "gastos"      && <GastosPage D={data} save={save} user={user} logAction={logAction} onRefreshDashboard={()=>setRtRefreshTrigger(t=>t+1)} />}
-              {tab === "analisis"    && <Analisis D={data} />}
-              {tab === "exportar"    && <Exportar D={data} />}
-              {tab === "usuarios"    && <UsuariosAdmin D={data} save={save} user={user} logAction={logAction} onProfileUpdate={newName=>setUser(u=>({...u,name:newName}))} />}
-              {tab === "superadmin" && <SuperAdminPanel />}
+              {mountedTabs.has("dashboard")   && <div style={{ display: tab === "dashboard"   ? "" : "none" }}><DashboardPremium D={data} setTab={setTab} user={user} refreshTrigger={rtRefreshTrigger} /></div>}
+              {mountedTabs.has("clientes")    && <div style={{ display: tab === "clientes"    ? "" : "none" }}><Clientes D={data} save={save} user={user} /></div>}
+              {mountedTabs.has("ventas")      && <div style={{ display: tab === "ventas"      ? "" : "none" }}><Ventas D={data} save={save} user={user} config={data.config} logAction={logAction} onRefreshDashboard={()=>{ invalidateAnalyticsCache(); setRtRefreshTrigger(t=>t+1); }} onReloadSales={reloadSales} salesLoading={salesLoading} salesError={salesError} /></div>}
+              {mountedTabs.has("pedidos")     && <div style={{ display: tab === "pedidos"     ? "" : "none" }}><Pedidos D={data} save={save} user={user} config={data.config} logAction={logAction} onRefreshDashboard={()=>setRtRefreshTrigger(t=>t+1)} /></div>}
+              {mountedTabs.has("deudas")      && <div style={{ display: tab === "deudas"      ? "" : "none" }}><Deudas D={data} save={save} user={user} logAction={logAction} /></div>}
+              {mountedTabs.has("productos")   && <div style={{ display: tab === "productos"   ? "" : "none" }}><Productos D={data} save={save} user={user} /></div>}
+              {mountedTabs.has("inventario")  && <div style={{ display: tab === "inventario"  ? "" : "none" }}><Inventario D={data} save={save} user={user} /></div>}
+              {mountedTabs.has("produccion")  && <div style={{ display: tab === "produccion"  ? "" : "none" }}><Produccion D={data} save={save} user={user} logAction={logAction} /></div>}
+              {mountedTabs.has("proveedores") && <div style={{ display: tab === "proveedores" ? "" : "none" }}><Proveedores D={data} save={save} /></div>}
+              {mountedTabs.has("caja")        && <div style={{ display: tab === "caja"        ? "" : "none" }}><Caja D={data} save={save} user={user} logAction={logAction} onRefreshDashboard={()=>setRtRefreshTrigger(t=>t+1)} /></div>}
+              {mountedTabs.has("gastos")      && <div style={{ display: tab === "gastos"      ? "" : "none" }}><GastosPage D={data} save={save} user={user} logAction={logAction} onRefreshDashboard={()=>setRtRefreshTrigger(t=>t+1)} /></div>}
+              {mountedTabs.has("analisis")    && <div style={{ display: tab === "analisis"    ? "" : "none" }}><Analisis D={data} /></div>}
+              {mountedTabs.has("exportar")    && <div style={{ display: tab === "exportar"    ? "" : "none" }}><Exportar D={data} /></div>}
+              {mountedTabs.has("usuarios")    && <div style={{ display: tab === "usuarios"    ? "" : "none" }}><UsuariosAdmin D={data} save={save} user={user} logAction={logAction} onProfileUpdate={newName=>setUser(u=>({...u,name:newName}))} /></div>}
+              {mountedTabs.has("superadmin")  && <div style={{ display: tab === "superadmin"  ? "" : "none" }}><SuperAdminPanel /></div>}
             </div>
           </main>
 
