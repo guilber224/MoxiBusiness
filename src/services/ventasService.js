@@ -9,29 +9,18 @@ const setLocal = (v, empresaId) => localStorage.setItem(_key(empresaId), JSON.st
 export const ventasService = {
   async getVentas(empresaId) {
     if (!empresaId) return null;
-
-    // Intento 1: select(*) — igual que productosService y gastosService.
-    // PostgREST devuelve todas las columnas existentes; columnas adicionales
-    // (ej: payment_method añadida por ALTER TABLE) llegan como claves JSON extra,
-    // lo cual es válido y normalizeSales las ignora sin problema.
+    // Columnas exactas que usa la app — sin select("*") para evitar payload innecesario.
+    // Límite de 12 meses: reduce drásticamente el volumen de datos transferidos.
+    const since = new Date();
+    since.setFullYear(since.getFullYear() - 1);
     const { data, error } = await supabase
       .from("ventas")
-      .select("*")
-      .eq("empresa_id", empresaId);
-
+      .select("id,empresa_id,total,paid,debt,items,payments,date,createdAt,customerName,customerId,payment_method,usuario_id")
+      .eq("empresa_id", empresaId)
+      .gte("createdAt", since.toISOString())
+      .order("createdAt", { ascending: false });
     if (!error) return data || [];
-
-    console.warn("[getVentas] select(*) falló:", error.code, error.message);
-
-    // Intento 2: solo columnas que analyticsService confirma existen
-    const { data: d2, error: e2 } = await supabase
-      .from("ventas")
-      .select("id,empresa_id,total,paid,debt,items,date,createdAt")
-      .eq("empresa_id", empresaId);
-
-    if (!e2) return d2 || [];
-
-    console.error("[getVentas] fallback también falló:", e2.code, e2.message);
+    console.warn("[getVentas] error:", error.code, error.message);
     return isSupabaseUUID(empresaId) ? null : getLocal(empresaId);
   },
 

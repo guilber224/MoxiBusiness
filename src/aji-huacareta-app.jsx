@@ -287,13 +287,14 @@ const init = async () => {
     return () => subscription.unsubscribe();
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // Después de login, cargar entidades principales desde Supabase.
-  // Las ventas se cargan en BACKGROUND para no bloquear el render del ERP —
-  // son la consulta más lenta y la menos crítica para el primer render.
+  // Después de login, cargar todas las entidades desde Supabase en paralelo.
+  // Ventas arranca al mismo tiempo que el resto — ya no espera que los datos críticos terminen.
+  // Con la query optimizada (columnas específicas + últimos 12 meses), es tan rápida como gastos.
   useEffect(()=>{
     if (!user?.empresa_id) return;
     setIsLoadingScope(true);
     setSalesLoading(true);
+    setSalesError(false);
     // Limpiar arrays síncronamente — ningún frame con datos de empresa anterior
     setData(d => d ? {
       ...d,
@@ -303,10 +304,16 @@ const init = async () => {
     const eid = user.empresa_id;
 
     // T(): garantiza que ninguna query bloquee más de 7 segundos.
-    // Si Supabase no responde a tiempo, resuelve null y el if(Array.isArray()) lo ignora.
     const T = (p) => Promise.race([p, new Promise(r => setTimeout(() => r(null), 7000))]);
 
-    // Paso 1: datos críticos en paralelo — máximo 7 segundos de espera total
+    // Ventas arranca EN PARALELO con los datos críticos — no espera al Paso 1.
+    // 8s timeout propio para no dejar el spinner indefinido.
+    const ventasRace = Promise.race([
+      ventasService.getVentas(eid),
+      new Promise(r => setTimeout(() => r(null), 8000)),
+    ]);
+
+    // Datos críticos en paralelo — máximo 7 segundos de espera total
     Promise.all([
       T(clientesService.getClientes(eid)),
       T(productosService.getProductos(eid)),
@@ -332,22 +339,18 @@ const init = async () => {
       if (scopedConfig?.currency) applyCurrencyCode(scopedConfig.currency);
     }).catch(err => { console.warn("[App] hydration failed:", err?.message ?? err); })
     .finally(() => {
-      setIsLoadingScope(false); // UI desbloqueada aquí — ventas se cargan aparte
+      setIsLoadingScope(false); // UI desbloqueada — ventas puede estar ya resuelta o llegar pronto
 
-      // Paso 2: ventas en background — no bloquean el render inicial (máx 10s)
-      setSalesError(false);
-      Promise.race([
-        ventasService.getVentas(eid),
-        new Promise(r => setTimeout(() => r(null), 10000)),
-      ]).then(supaVentas => {
+      // Ventas ya estaba cargando desde el inicio — sólo esperamos el resultado
+      ventasRace
+        .then(supaVentas => {
           if (Array.isArray(supaVentas)) {
             setData(d => d ? { ...d, sales: normalizeSales(supaVentas) } : d);
           } else {
-            // null = todas las queries fallaron — mostrar estado de error en Ventas
             setSalesError(true);
           }
         })
-        .catch(e => { console.warn("[App] getVentas background failed:", e?.message); setSalesError(true); })
+        .catch(e => { console.warn("[App] getVentas failed:", e?.message); setSalesError(true); })
         .finally(() => setSalesLoading(false));
     });
   }, [user?.empresa_id]); // eslint-disable-line react-hooks/exhaustive-deps
