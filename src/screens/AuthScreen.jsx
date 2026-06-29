@@ -1,5 +1,5 @@
 import { useState, useEffect } from "react";
-import { supabase } from "../lib/supabaseClient";
+import { supabase, SUPABASE_URL, SUPABASE_ANON_KEY } from "../lib/supabaseClient";
 import { authService } from "../services/authService.js";
 import { userService } from "../services/userService.js";
 import { BRAND_NAME, BRAND_SUBTITLE, C, R, FONT, safeBusinessName } from "../theme.jsx";
@@ -14,6 +14,25 @@ export function AuthScreen({ config, onLogin, saveConfig }) {
   const [forgotSent, setForgotSent] = useState(false);
   const [err, setErr] = useState("");
   const [loading, setLoading] = useState(false);
+  const [serverStatus, setServerStatus] = useState("checking"); // "checking" | "ok" | "slow" | "error"
+
+  // Ping al servidor al cargar la pantalla para despertar el cold start de Supabase
+  // antes de que el usuario intente iniciar sesión.
+  useEffect(() => {
+    let cancelled = false;
+    const ctrl = new AbortController();
+    const t0 = Date.now();
+    fetch(`${SUPABASE_URL}/auth/v1/health`, {
+      headers: { apikey: SUPABASE_ANON_KEY },
+      signal: ctrl.signal,
+    })
+      .then(r => {
+        if (!cancelled && r.ok) setServerStatus(Date.now() - t0 > 4000 ? "slow" : "ok");
+        else if (!cancelled) setServerStatus("error");
+      })
+      .catch(() => { if (!cancelled) setServerStatus("error"); });
+    return () => { cancelled = true; ctrl.abort(); };
+  }, []);
 
   useEffect(() => { setErr(""); }, [mode]);
 
@@ -31,16 +50,16 @@ export function AuthScreen({ config, onLogin, saveConfig }) {
         e.message?.includes("Failed to fetch") ||
         e.message?.toLowerCase?.().includes("network");
 
-      // Intento 1 con 20s — cold start de Supabase free tier puede tardar 15s
+      // Intento 1 con 12s — el ping ya despertó a Supabase, debería responder rápido
       let authUser = null;
       try {
-        authUser = await wt(authService.login(loginForm.username, loginForm.password), 20000);
+        authUser = await wt(authService.login(loginForm.username, loginForm.password), 12000);
       } catch (e1) {
         if (isNetworkErr(e1)) {
-          // Intento 2: segundo intento mientras Supabase despierta
+          // Intento 2: segundo intento por si el cold start aún no terminó
           setErr("Conectando con el servidor, reintentando…");
           try {
-            authUser = await wt(authService.login(loginForm.username, loginForm.password), 20000);
+            authUser = await wt(authService.login(loginForm.username, loginForm.password), 15000);
           } catch {
             setErr("No se pudo conectar. Verifica tu internet o que el proyecto Supabase esté activo (supabase.com/dashboard).");
             return;
@@ -179,6 +198,25 @@ export function AuthScreen({ config, onLogin, saveConfig }) {
           {/* ── LOGIN ── */}
           {mode === "login" && (
             <>
+              {/* Indicador de estado del servidor */}
+              {serverStatus === "checking" && (
+                <div style={{ display: "flex", alignItems: "center", gap: 7, marginBottom: 14, padding: "7px 10px", borderRadius: R.md, background: "rgba(255,255,255,0.04)", fontSize: 12, color: "rgba(255,255,255,0.38)" }}>
+                  <span style={{ width: 7, height: 7, borderRadius: "50%", background: "rgba(255,255,255,0.25)", display: "inline-block", animation: "pulse 1s ease-in-out infinite" }} />
+                  Verificando conexión con el servidor…
+                </div>
+              )}
+              {serverStatus === "slow" && (
+                <div style={{ display: "flex", alignItems: "center", gap: 7, marginBottom: 14, padding: "7px 10px", borderRadius: R.md, background: "rgba(234,179,8,0.10)", border: "1px solid rgba(234,179,8,0.2)", fontSize: 12, color: "#fde68a" }}>
+                  <span style={{ width: 7, height: 7, borderRadius: "50%", background: "#fbbf24", display: "inline-block" }} />
+                  Servidor lento — el inicio de sesión puede tardar unos segundos.
+                </div>
+              )}
+              {serverStatus === "error" && (
+                <div style={{ display: "flex", alignItems: "flex-start", gap: 7, marginBottom: 14, padding: "8px 10px", borderRadius: R.md, background: "rgba(185,28,28,0.12)", border: "1px solid rgba(185,28,28,0.25)", fontSize: 12, color: "#FCA5A5", lineHeight: 1.5 }}>
+                  <span style={{ width: 7, height: 7, borderRadius: "50%", background: "#f87171", display: "inline-block", marginTop: 3, flexShrink: 0 }} />
+                  <span>No se pudo contactar el servidor. El proyecto Supabase puede estar <strong>pausado</strong>. Ve a <strong>supabase.com/dashboard</strong> → tu proyecto → <strong>Resume project</strong>.</span>
+                </div>
+              )}
               <div style={{ marginBottom: 12 }}>
                 <label style={darkLabel}>Email</label>
                 <input style={darkField} value={loginForm.username} onChange={e => setLoginForm({ ...loginForm, username: e.target.value })} placeholder="tu@email.com" onKeyDown={e => e.key === "Enter" && doLogin()} autoFocus />
