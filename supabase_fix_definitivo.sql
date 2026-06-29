@@ -108,7 +108,47 @@ CREATE POLICY "usuarios_delete_admin"
   ON public.usuarios FOR DELETE
   USING (empresa_id = public.get_empresa_id() AND id != auth.uid() AND public.get_my_role() = 'admin');
 
--- ── PASO 5: Verificación — ejecuta esto para confirmar ───────
+-- ── PASO 5: Agregar columnas faltantes en productos ─────────
+-- La app envía estos campos; si la tabla no los tiene, el INSERT falla.
+-- ADD COLUMN IF NOT EXISTS es seguro: no hace nada si ya existe.
+ALTER TABLE public.productos
+  ADD COLUMN IF NOT EXISTS cost        numeric       DEFAULT 0,
+  ADD COLUMN IF NOT EXISTS "minStock"  numeric       DEFAULT 0,
+  ADD COLUMN IF NOT EXISTS cat         text          DEFAULT '',
+  ADD COLUMN IF NOT EXISTS img         text,
+  ADD COLUMN IF NOT EXISTS name        text;
+
+-- Columnas adicionales de ventas
+ALTER TABLE public.ventas
+  ADD COLUMN IF NOT EXISTS payment_method  text      DEFAULT 'efectivo',
+  ADD COLUMN IF NOT EXISTS "usuario_id"    uuid,
+  ADD COLUMN IF NOT EXISTS items           jsonb,
+  ADD COLUMN IF NOT EXISTS debt            numeric   DEFAULT 0,
+  ADD COLUMN IF NOT EXISTS discount        numeric   DEFAULT 0,
+  ADD COLUMN IF NOT EXISTS notes           text,
+  ADD COLUMN IF NOT EXISTS "customerId"    text;
+
+-- Columnas adicionales de inventario
+ALTER TABLE public.inventario
+  ADD COLUMN IF NOT EXISTS "productId"  text,
+  ADD COLUMN IF NOT EXISTS stock        numeric   DEFAULT 0,
+  ADD COLUMN IF NOT EXISTS "updatedAt"  timestamptz DEFAULT now();
+
+-- Columnas adicionales de clientes
+ALTER TABLE public.clientes
+  ADD COLUMN IF NOT EXISTS phone        text,
+  ADD COLUMN IF NOT EXISTS address      text,
+  ADD COLUMN IF NOT EXISTS notes        text;
+
+-- Columnas adicionales de movimientos
+ALTER TABLE public.movimientos
+  ADD COLUMN IF NOT EXISTS cost         numeric   DEFAULT 0,
+  ADD COLUMN IF NOT EXISTS type         text,
+  ADD COLUMN IF NOT EXISTS description  text,
+  ADD COLUMN IF NOT EXISTS "productId"  text,
+  ADD COLUMN IF NOT EXISTS "createdAt"  timestamptz DEFAULT now();
+
+-- ── PASO 6: Verificación — ejecuta esto para confirmar ───────
 -- (Descomenta y ejecuta por separado para ver el estado)
 
 -- SELECT id, email, nombre, role, empresa_id FROM public.usuarios;

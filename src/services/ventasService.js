@@ -57,7 +57,8 @@ export const ventasService = {
       console.error("[ventasService] createVenta FALLBACK:", e.message);
       const nueva = { ...venta, id: venta.id || "v" + Date.now(), _localOnly: true };
       const eid = venta.empresa_id;
-      if (!isSupabaseUUID(eid)) setLocal([nueva, ...getLocal(eid)], eid);
+      // Guardar en localStorage siempre (scoped key para Supabase, global para local)
+      setLocal([nueva, ...getLocal(eid)], eid);
       return nueva;
     }
   },

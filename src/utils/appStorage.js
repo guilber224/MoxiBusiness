@@ -1,6 +1,6 @@
 import { uid } from "./businessLogic.js";
 import { getCurrentEmpresaId, isSupabaseScope } from "../empresaScope.js";
-import { getScopedStorageKey } from "./storageScope.js";
+import { getScopedStorageKey, isSupabaseUUID } from "./storageScope.js";
 
 const storageApi = {
   async get(key) {
@@ -51,18 +51,18 @@ const LEGACY_STORAGE_KEYS = {
 export const DEFAULT_CONFIG = { businessName: "", currency: "BOB", createdAt: null, updatedAt: null };
 export const DEFAULT_ACTIVITY_LOGS = [];
 
-// Claves de datos de negocio con backing en Supabase — NUNCA persistir en localStorage para cuentas Supabase.
-// Supabase es la única fuente de verdad para estas entidades.
-const SUPABASE_DATA_KEYS = new Set(["customers","products","inventory","sales","expenses","movements"]);
-
 export const loadStoredValue = async (key, fallback) => {
   if (getCurrentEmpresaId()) {
-    // Supabase UUID: business data proviene de Supabase, no localStorage.
-    // Leer localStorage aquí causaría datos fantasma y contaminación cruzada.
-    if (isSupabaseScope() && SUPABASE_DATA_KEYS.has(key)) return fallback;
-    // Supabase/multiempresa: SOLO clave scoped — nunca caer a global ni legacy.
+    // Supabase/multiempresa: preferir clave scoped (caché post-hidratación).
     const scoped = await DB.get(getScopedStorageKey(key, getCurrentEmpresaId()), undefined);
-    return scoped !== undefined ? scoped : fallback;
+    if (scoped !== undefined) return scoped;
+    // Fallback a clave global moxi_* — usuarios que migran de modo local a Supabase
+    // tienen sus datos ahí hasta que se suban a Supabase por primera vez.
+    if (STORAGE_KEYS[key]) {
+      const global = await DB.get(STORAGE_KEYS[key], undefined);
+      if (global !== undefined) return global;
+    }
+    return fallback;
   }
   // Modo local/legacy: global moxi_* → ah_* → fallback
   const primary = await DB.get(STORAGE_KEYS[key], undefined);
@@ -77,15 +77,24 @@ export const loadStoredValue = async (key, fallback) => {
 
 export const persistValue = (key, value) => {
   if (getCurrentEmpresaId()) {
-    // Supabase UUID: business data se persiste en Supabase (vía syncDiff/services).
-    // Escribir en localStorage generaría datos rancios y contaminación entre dispositivos.
-    if (isSupabaseScope() && SUPABASE_DATA_KEYS.has(key)) return;
-    // Supabase mode: SOLO clave scoped — nunca escribir en global.
+    // Siempre escribir al localStorage scoped — sirve de caché local cuando Supabase
+    // no está disponible o cuando hay errores de inserción (ej. columnas faltantes).
+    // cacheSupabaseData() sobrescribirá con datos confirmados de Supabase al hidratar.
     DB.set(getScopedStorageKey(key, getCurrentEmpresaId()), value);
     return;
   }
   // Modo local: clave global moxi_*
   DB.set(STORAGE_KEYS[key] || key, value);
+};
+
+// Escribe datos de Supabase al localStorage scoped como caché.
+// Solo para cuentas Supabase (UUID). Llamar después de cada hidratación exitosa.
+// Permite mostrar datos cacheados instantáneamente en el próximo login.
+export const cacheSupabaseData = (key, value, empresaId) => {
+  if (!isSupabaseUUID(empresaId)) return;
+  const scopedKey = getScopedStorageKey(key, empresaId);
+  if (!scopedKey) return;
+  try { localStorage.setItem(scopedKey, JSON.stringify(value)); } catch {}
 };
 
 export const buildActivityEntry = (user, action, meta = {}) => ({

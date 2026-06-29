@@ -21,51 +21,52 @@ export const productosService = {
       return (data || []).map(normalizeProducto);
     } catch (e) {
       console.warn("fallback getProductos:", e.message);
-      if (isSupabaseUUID(empresaId)) return [];
+      if (isSupabaseUUID(empresaId)) return null;
       return getLocal(empresaId);
     }
   },
 
   async upsertProducto(producto) {
-    const _upsert = async (p) => {
-      const { id, empresa_id, ...fields } = p;
+    const eid = producto.empresa_id;
+    if (!eid) throw new Error("empresa_id requerido");
+
+    // Intenta el upsert; si Supabase devuelve error 42703 (columna inexistente),
+    // elimina esa columna y reintenta — repite hasta que todas las columnas válidas pasen.
+    let payload = (() => {
+      const { id, empresa_id, ...fields } = producto;
       const baseFields = { ...fields, nombre: fields.name || "" };
-      const payload = id ? { id, empresa_id, ...baseFields } : { empresa_id, ...baseFields };
+      return id ? { id, empresa_id, ...baseFields } : { empresa_id, ...baseFields };
+    })();
+
+    for (let attempt = 0; attempt < 15; attempt++) {
       const { data, error } = await supabase
         .from("productos")
         .upsert([payload], { onConflict: "id" })
         .select();
-      if (error) throw error;
-      return normalizeProducto(data[0]);
-    };
 
-    try {
-      if (!producto.empresa_id) throw new Error("empresa_id requerido");
-      return await _upsert(producto);
-    } catch (e) {
-      // Si la columna no existe aún (ej: cost antes de ejecutar la migración SQL),
-      // reintentar sin esa columna desconocida para no bloquear la operación.
-      if (e.code === "42703") {
-        const match = (e.message || "").match(/column "([^"]+)"/);
+      if (!error) return normalizeProducto(data[0]);
+
+      if (error.code === "42703") {
+        const match = (error.message || "").match(/column ["']?([^"'\s,]+)["']?/i);
         if (match) {
           const badCol = match[1];
-          console.warn(`[productosService] columna "${badCol}" no existe en DB, reintentando sin ella`);
-          const { [badCol]: _dropped, ...sinCol } = producto;
-          try { return await _upsert(sinCol); } catch (e2) {
-            console.error("[productosService] retry sin columna también falló:", e2.message);
-          }
+          console.warn(`[productosService] columna "${badCol}" no existe, reintentando sin ella`);
+          const { [badCol]: _dropped, ...rest } = payload;
+          payload = rest;
+          continue;
         }
-      } else {
-        console.error("[productosService] UPSERT error:", e.code, e.message);
       }
-      const eid = producto.empresa_id;
-      if (!isSupabaseUUID(eid)) {
-        const local = getLocal(eid);
-        const idx = local.findIndex(p => p.id === producto.id);
-        setLocal(idx >= 0 ? local.map((p, i) => i === idx ? producto : p) : [...local, producto], eid);
-      }
-      return { ...producto, _localOnly: true };
+
+      // Error no recuperable — loguear y salir del loop
+      console.error("[productosService] UPSERT error:", error.code, error.message);
+      break;
     }
+
+    // Fallback: guardar en localStorage scoped (persiste aunque Supabase rechace)
+    const local = getLocal(eid);
+    const idx = local.findIndex(p => p.id === producto.id);
+    setLocal(idx >= 0 ? local.map((p, i) => i === idx ? producto : p) : [...local, producto], eid);
+    return { ...producto, _localOnly: true };
   },
 
   async deleteProducto(id, empresaId) {

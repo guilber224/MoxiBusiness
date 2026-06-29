@@ -369,14 +369,17 @@ const init = async () => {
         if (!d) return d;
         const cats = d.categories || DEFAULT_CATEGORIES;
         const next = { ...d };
-        // null = Supabase falló → conservar caché; [] = tabla vacía → actualizar
-        if (Array.isArray(supaClientes))    { next.customers  = normalizeCustomers(supaClientes);      cacheSupabaseData("customers",  supaClientes,    eid); }
-        if (Array.isArray(supaProductos))   { next.products   = sanitizeProducts(supaProductos, cats); cacheSupabaseData("products",   supaProductos,   eid); }
-        if (Array.isArray(supaInventario))  { next.inventory  = supaInventario;                        cacheSupabaseData("inventory",  supaInventario,  eid); }
-        if (Array.isArray(supaGastos))      { next.expenses   = supaGastos;                            cacheSupabaseData("expenses",   supaGastos,      eid); }
-        if (Array.isArray(supaMovimientos)) { next.movements  = supaMovimientos;                       cacheSupabaseData("movements",  supaMovimientos, eid); }
-        if (Array.isArray(supaPedidos))     { next.pedidos    = supaPedidos;                           cacheSupabaseData("pedidos",    supaPedidos,     eid); }
-        if (scopedConfig)                   next.config       = scopedConfig;
+        // null  = Supabase falló o timeout → conservar caché local
+        // []    = Supabase respondió vacío → NO sobreescribir si tenemos datos en caché
+        //         (evita borrar datos salvados localmente cuando RLS o columnas fallan)
+        // [...]  = Supabase tiene datos → actualizar y cachear
+        if (Array.isArray(supaClientes)    && supaClientes.length    > 0) { next.customers  = normalizeCustomers(supaClientes);      cacheSupabaseData("customers",  supaClientes,    eid); }
+        if (Array.isArray(supaProductos)   && supaProductos.length   > 0) { next.products   = sanitizeProducts(supaProductos, cats); cacheSupabaseData("products",   supaProductos,   eid); }
+        if (Array.isArray(supaInventario)  && supaInventario.length  > 0) { next.inventory  = supaInventario;                        cacheSupabaseData("inventory",  supaInventario,  eid); }
+        if (Array.isArray(supaGastos)      && supaGastos.length      > 0) { next.expenses   = supaGastos;                            cacheSupabaseData("expenses",   supaGastos,      eid); }
+        if (Array.isArray(supaMovimientos) && supaMovimientos.length > 0) { next.movements  = supaMovimientos;                       cacheSupabaseData("movements",  supaMovimientos, eid); }
+        if (Array.isArray(supaPedidos)     && supaPedidos.length     > 0) { next.pedidos    = supaPedidos;                           cacheSupabaseData("pedidos",    supaPedidos,     eid); }
+        if (scopedConfig)                                                   next.config      = scopedConfig;
         return next;
       });
       if (scopedConfig?.currency) applyCurrencyCode(scopedConfig.currency);
@@ -453,25 +456,27 @@ const init = async () => {
         ventasRace
           .then(supaVentas => {
             if (cancelled) return;
-            if (Array.isArray(supaVentas)) {
-              if (supaVentas.length === 0) {
-                const localSales = getLocalFallbackData("moxi_sales", "ah_sales");
-                if (localSales.length > 0) {
-                  const rows = localSales.filter(v => v?.id).map(({ _localOnly, ...v }) => ({
-                    ...v, empresa_id: eid, createdAt: v.createdAt || v.date || new Date().toISOString()
-                  }));
-                  supabase.from("ventas").upsert(rows.slice(0, 150), { onConflict: "id", ignoreDuplicates: true }).then(({ error }) => {
-                    if (error) console.warn("[migrate] ventas:", error.message);
-                    if (!cancelled) {
-                      setData(d => d ? { ...d, sales: normalizeSales(localSales) } : d);
-                      cacheSupabaseData("sales", localSales, eid);
-                    }
-                  });
-                }
-              } else {
-                setData(d => d ? { ...d, sales: normalizeSales(supaVentas) } : d);
-                cacheSupabaseData("sales", supaVentas, eid);
+            if (Array.isArray(supaVentas) && supaVentas.length > 0) {
+              // Supabase tiene ventas — actualizar estado y cachear
+              setData(d => d ? { ...d, sales: normalizeSales(supaVentas) } : d);
+              cacheSupabaseData("sales", supaVentas, eid);
+            } else if (Array.isArray(supaVentas) && supaVentas.length === 0) {
+              // Supabase vacío — intentar migrar ventas locales si hay
+              const localSales = getLocalFallbackData("moxi_sales", "ah_sales");
+              if (localSales.length > 0) {
+                const rows = localSales.filter(v => v?.id).map(({ _localOnly, ...v }) => ({
+                  ...v, empresa_id: eid, createdAt: v.createdAt || v.date || new Date().toISOString()
+                }));
+                supabase.from("ventas").upsert(rows.slice(0, 150), { onConflict: "id", ignoreDuplicates: true }).then(({ error }) => {
+                  if (error) console.warn("[migrate] ventas:", error.message);
+                  if (!cancelled) {
+                    setData(d => d ? { ...d, sales: normalizeSales(localSales) } : d);
+                    cacheSupabaseData("sales", localSales, eid);
+                  }
+                });
               }
+              // Si no hay datos locales ni en Supabase, no tocar el estado
+              // (la caché del localStorage se preserva)
             } else {
               setSalesError(true);
             }
