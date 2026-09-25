@@ -47,26 +47,39 @@ export function Inventario({ D, save, user }) {
     } else {
       if(idx>=0)newInv[idx]={...newInv[idx],stock:Math.max(0,newInv[idx].stock-qty)};
     }
-    // Sync each changed inventory item to Supabase directly, esperando confirmación antes de aplicar localmente
     const changedItems = newInv.filter(item => {
       const prev = inventory.find(i => i.productId === item.productId);
       return !prev || prev.stock !== item.stock;
     });
-    const upsertResults = await Promise.all(
-      changedItems.map(item => inventarioService.upsertStock(item, user?.empresa_id).catch(e => { console.error("[Inventario] upsertStock:", e.message); return { _localOnly: true }; }))
-    );
-    if (upsertResults.some(r => r?._localOnly) && isSupabaseUUID(user?.empresa_id)) {
-      toast.error("⚠ Error Supabase al ajustar el stock. No se guardó — revisa tu conexión e intenta de nuevo.");
-      return;
-    }
+    const previousById = new Map(changedItems.map(item => [item.productId, inventory.find(i => i.productId === item.productId)]));
     const movimiento = {id:generateId(),...form,qty,cost:n(form.cost)||0,createdAt:new Date().toISOString(),usuario_id:user?.id};
-    const movRes = await movimientosService.createMovimiento(movimiento, user?.empresa_id).catch(e => { console.error("[Inventario] createMovimiento:", e.message); return { _localOnly: true }; });
-    if (movRes?._localOnly && isSupabaseUUID(user?.empresa_id)) {
+
+    // Optimista + sync:false: el stock cambia al instante y se sube a Supabase una sola vez
+    // (syncDiff ya no repite el upsert). Stock y movimiento se envían en paralelo.
+    const changedMap = new Map(changedItems.map(item => [item.productId, item]));
+    save("inventory", cur => {
+      const base = (cur || []).map(i => changedMap.get(i.productId) || i);
+      const added = changedItems.filter(item => !base.some(i => i.productId === item.productId));
+      return [...base, ...added];
+    }, { sync: false });
+    save("movements", cur => [movimiento, ...(cur || [])]);
+    setModal(false); setForm({productId:"",type:"entrada",qty:"",cost:"",notes:"",date:today()});
+
+    const [upsertResults, movRes] = await Promise.all([
+      Promise.all(changedItems.map(item => inventarioService.upsertStock(item, user?.empresa_id).catch(e => { console.error("[Inventario] upsertStock:", e.message); return { _localOnly: true }; }))),
+      movimientosService.createMovimiento(movimiento, user?.empresa_id).catch(e => { console.error("[Inventario] createMovimiento:", e.message); return { _localOnly: true }; }),
+    ]);
+    if (!isSupabaseUUID(user?.empresa_id)) return;
+    if (upsertResults.some(r => r?._localOnly)) {
+      // Revertir solo los productos tocados, sin pisar otros cambios hechos mientras tanto
+      save("inventory", cur => (cur || [])
+        .map(i => previousById.has(i.productId) ? previousById.get(i.productId) : i)
+        .filter(Boolean), { sync: false });
+      save("movements", cur => (cur || []).filter(m => m.id !== movimiento.id));
+      toast.error("⚠ Error Supabase al ajustar el stock. Se revirtió — revisa tu conexión e intenta de nuevo.");
+    } else if (movRes?._localOnly) {
       toast.error("⚠ El stock se guardó, pero no se pudo registrar el movimiento en Supabase. Revisa tu conexión.");
     }
-    save("inventory",newInv);
-    save("movements",[movimiento,...movements]);
-    setModal(false); setForm({productId:"",type:"entrada",qty:"",cost:"",notes:"",date:today()});
   };
 
   const levelBadge={ok:"green",low:"amber",empty:"red"};

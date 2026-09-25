@@ -497,7 +497,6 @@ export function Ventas({ D, save, user, config, logAction, onRefreshDashboard, o
       return;
     }
     window._stockWarningConfirmed = false;
-    const newInv = inventory.map(i => { const qty = prod_map[i.productId]; return qty ? { ...i, stock: Math.max(0, i.stock - qty) } : i; });
     const sale = {
       id: generateId(),
       numero: Date.now(), customerId: form.customerId, customerName: cust.name, customerMarket: cust.market,
@@ -508,36 +507,49 @@ export function Ventas({ D, save, user, config, logAction, onRefreshDashboard, o
       payments: paidN > 0 ? [{ amount: paidN, method: form.paymentMethod, date: new Date().toISOString() }] : [],
       createdAt: new Date().toISOString(), empresa_id: user.empresa_id,
     };
-    let ventaFinal = { ...sale };
-    try {
-      const nueva = await ventasService.createVenta(sale, user);
-      if (nueva?.id) ventaFinal = { ...sale, id: nueva.id };
-      if (nueva?._localOnly && isSupabaseUUID(user?.empresa_id)) {
-        setErr("⚠ Error Supabase al guardar venta. Revisa la consola (F12) para ver el detalle.");
-        return;
-      }
-    } catch (e) { console.warn("Venta Supabase error:", e.message); }
-    save("sales", [ventaFinal, ...(sales || [])]); save("inventory", newInv);
+    // Optimista: la venta y el descuento de stock se ven al instante; Supabase confirma en segundo plano.
+    // El id lo genera el cliente (UUID), así que es el mismo que quedará en Supabase.
+    const prevStock = new Map(inventory.filter(i => prod_map[i.productId]).map(i => [i.productId, i.stock]));
+    save("sales", cur => [sale, ...(cur || [])]);
+    save("inventory", cur => (cur || []).map(i => { const qty = prod_map[i.productId]; return qty ? { ...i, stock: Math.max(0, i.stock - qty) } : i; }));
     logAction?.(`${user.name} realizó una venta de ${Bs(total)} a ${cust.name}`);
     setFeedback("✓ Venta registrada"); setTimeout(() => setFeedback(""), 4000);
     closeModal();
-    setComprobanteVenta(ventaFinal);
+    setComprobanteVenta(sale);
+    onRefreshDashboard?.();
+
+    let nueva;
+    try { nueva = await ventasService.createVenta(sale, user); }
+    catch (e) { console.warn("Venta Supabase error:", e.message); nueva = { _localOnly: true }; }
+    if (nueva?._localOnly && isSupabaseUUID(user?.empresa_id)) {
+      save("sales", cur => (cur || []).filter(s => s.id !== sale.id));
+      save("inventory", cur => (cur || []).map(i => prevStock.has(i.productId) ? { ...i, stock: prevStock.get(i.productId) } : i));
+      setComprobanteVenta(cv => cv?.id === sale.id ? null : cv);
+      setFeedback("");
+      setErr(`⚠ No se pudo guardar la venta a ${cust.name} por ${Bs(total)} en Supabase. Se revirtió el stock — revisa tu conexión y regístrala de nuevo.`);
+    }
   };
 
   const doPayment = async () => {
     if (!detail) return; const amt = Math.min(n(payAmt), detail.debt); if (amt <= 0) return;
     const updated = sales.map(s => s.id === detail.id ? { ...s, paid: s.paid + amt, debt: Math.max(0, s.debt - amt), payments: [...(s.payments || []), { amount: amt, date: new Date().toISOString() }] } : s);
     const ventaActualizada = updated.find(s => s.id === detail.id);
+    const ventaPrevia = detail;
     setErr("");
+    // Optimista: el cobro se refleja al instante; si Supabase lo rechaza se revierte.
+    save("sales", cur => (cur || []).map(s => s.id === ventaActualizada.id ? ventaActualizada : s));
+    setDetail(ventaActualizada); setPayAmt("");
+    onRefreshDashboard?.();
     let result;
-    try { result = await ventasService.updateVenta(detail.id, ventaActualizada, user?.empresa_id); }
-    catch (e) { console.warn("Cobro Supabase error:", e.message); }
+    try { result = await ventasService.updateVenta(ventaActualizada.id, ventaActualizada, user?.empresa_id); }
+    catch (e) { console.warn("Cobro Supabase error:", e.message); result = { _localOnly: true }; }
     if (result?._localOnly && isSupabaseUUID(user?.empresa_id)) {
+      save("sales", cur => (cur || []).map(s => s.id === ventaPrevia.id ? ventaPrevia : s));
+      setDetail(d => d?.id === ventaPrevia.id ? ventaPrevia : d);
       setErr("⚠ Error Supabase al registrar el cobro. El pago no se guardó — revisa tu conexión e intenta de nuevo.");
       return;
     }
-    save("sales", updated); setDetail(ventaActualizada); setPayAmt("");
-    logAction?.(`${user.name} registró un cobro de ${Bs(amt)} para la venta ${detail.id}`);
+    logAction?.(`${user.name} registró un cobro de ${Bs(amt)} para la venta ${ventaActualizada.id}`);
   };
 
   const doDeleteSale = async () => {
@@ -673,20 +685,10 @@ export function Ventas({ D, save, user, config, logAction, onRefreshDashboard, o
         {onReloadSales && <button onClick={onReloadSales} style={{ ...mkBtn("ghost"), fontSize: 12, padding: "7px 12px" }}>↺ Recargar</button>}
       </div>
       {salesLoading ? (
-        <div style={{ textAlign: "center", padding: "40px 16px", color: C.textFaint }}>
-          <div style={{ fontSize: 28, marginBottom: 8 }}>⏳</div>
-          <div style={{ fontSize: 13, fontWeight: 500 }}>Sincronizando ventas…</div>
-          <div style={{ fontSize: 11, marginTop: 4 }}>Conectando con Supabase, espera unos segundos</div>
+        <div style={{ textAlign: "center", padding: "32px 16px", color: C.textFaint }}>
+          <div style={{ fontSize: 13, fontWeight: 500 }}>Cargando ventas…</div>
         </div>
-      ) : salesError && sales.length === 0 ? (
-        <div style={{ textAlign: "center", padding: "40px 16px" }}>
-          <div style={{ fontSize: 28, marginBottom: 8 }}>🔌</div>
-          <div style={{ fontSize: 14, fontWeight: 600, marginBottom: 6 }}>Sin conexión a Supabase</div>
-          <div style={{ fontSize: 12, color: C.textFaint, marginBottom: 4 }}>El proyecto puede estar <strong>pausado</strong> (plan gratuito pausa cada 7 días sin uso).</div>
-          <div style={{ fontSize: 12, color: C.textFaint, marginBottom: 16 }}>Ve a <strong>supabase.com/dashboard</strong> → tu proyecto → <strong>Resume project</strong>, luego reintenta.</div>
-          {onReloadSales && <button onClick={onReloadSales} style={mkBtn("primary")}>↺ Reintentar conexión</button>}
-        </div>
-      ) : filtered.length === 0 ? <Empty icon="🛒" title="Sin ventas" sub={sales.length === 0 ? "Registra tu primera venta" : "Sin resultados"} action={<div style={{ display: "flex", gap: 8, flexWrap: "wrap", justifyContent: "center" }}>{sales.length === 0 && onReloadSales && <button onClick={onReloadSales} style={mkBtn("ghost")}>↺ Reintentar carga</button>}<button onClick={() => setModal("new")} style={mkBtn("primary")}>+ Registrar venta</button></div>} /> :
+      ) : filtered.length === 0 ? <Empty icon="🛒" title="Sin ventas" sub={sales.length === 0 ? "Registra tu primera venta" : "Sin resultados"} action={<div style={{ display: "flex", gap: 8, flexWrap: "wrap", justifyContent: "center" }}>{onReloadSales && <button onClick={onReloadSales} style={mkBtn("ghost")}>↺ Recargar</button>}<button onClick={() => setModal("new")} style={mkBtn("primary")}>+ Registrar venta</button></div>} /> :
         filtered.map(s => (
           <div key={s.id || s.numero} onClick={() => setDetail(s)} style={{ ...card(), cursor: "pointer", marginBottom: 8, display: "flex", justifyContent: "space-between", alignItems: "center", gap: 10 }} onMouseEnter={e => e.currentTarget.style.borderColor = C.borderMid} onMouseLeave={e => e.currentTarget.style.borderColor = C.border}>
             <div style={{ minWidth: 0 }}>

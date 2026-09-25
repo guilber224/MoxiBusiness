@@ -18,7 +18,7 @@ export const gastosService = {
       return data || [];
     } catch (e) {
       console.warn("fallback getGastos:", e.message);
-      if (isSupabaseUUID(empresaId)) return [];
+      if (isSupabaseUUID(empresaId)) return null;
       return getLocal(empresaId);
     }
   },

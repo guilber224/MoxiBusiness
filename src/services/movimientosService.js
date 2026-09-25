@@ -18,7 +18,7 @@ export const movimientosService = {
       return data || [];
     } catch (e) {
       console.warn("fallback getMovimientos:", e.message);
-      if (isSupabaseUUID(empresaId)) return [];
+      if (isSupabaseUUID(empresaId)) return null;
       return getLocal(empresaId);
     }
   },

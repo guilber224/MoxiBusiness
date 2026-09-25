@@ -21,7 +21,7 @@ export const clientesService = {
       return (data || []).map(normalizeCliente);
     } catch (e) {
       console.warn("fallback getClientes:", e.message);
-      if (isSupabaseUUID(empresaId)) return [];
+      if (isSupabaseUUID(empresaId)) return null;
       return getLocal(empresaId);
     }
   },

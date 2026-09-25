@@ -41,31 +41,34 @@ export function Productos({ D, save, user }) {
     if (!form.name.trim()) return;
     setProdErr("");
     const nextProduct = { ...form, price:n(form.price), cost:n(form.cost)||0, minStock:n(form.minStock), cat:form.cat||DEFAULT_CATEGORY_ID };
+    // Optimista + sync:false: se muestra al instante y el servicio sube a Supabase una sola vez
+    // (antes syncDiff repetía el mismo upsert). Si falla, el producto queda guardado localmente.
     if (modal === "new") {
       const producto = { ...nextProduct, id: generateId(), empresa_id: user?.empresa_id };
+      save("products", cur => [...(cur || []), { ...nextProduct, id: producto.id }], { sync: false });
+      setModal(null);
       const saved = await productosService.upsertProducto(producto);
-      // Siempre guardar localmente — si Supabase falla el usuario no pierde su producto
-      save("products", [...products, { ...nextProduct, id: producto.id }]);
       if (saved?._localOnly && isSupabaseUUID(user?.empresa_id)) {
         toast.error("Producto guardado localmente. Para sincronizar con Supabase ejecuta supabase_nuevas_columnas.sql");
       }
     } else {
       const producto = { ...products.find(p => p.id === modal.id), ...nextProduct, empresa_id: user?.empresa_id };
+      save("products", cur => (cur || []).map(p => p.id === producto.id ? { ...p, ...nextProduct } : p), { sync: false });
+      setModal(null);
       const saved = await productosService.upsertProducto(producto);
-      save("products", products.map(p => p.id === modal.id ? { ...p, ...nextProduct } : p));
       if (saved?._localOnly && isSupabaseUUID(user?.empresa_id)) {
         toast.error("Edición guardada localmente. No se pudo sincronizar con Supabase.");
       }
     }
-    setModal(null);
   };
   const doDeleteProduct = async (id) => {
+    const target = products.find(item => item.id === id);
+    save("products", cur => (cur || []).filter(item => item.id !== id), { sync: false });
     const res = await productosService.deleteProducto(id, user?.empresa_id).catch(e => { console.error("[Productos] delete:", e.message); return { ok: false, error: e.message }; });
     if (res?.ok === false) {
-      toast.error("⚠ No se pudo eliminar en Supabase. Revisa tu conexión e intenta de nuevo.");
-      return;
+      if (target) save("products", cur => (cur || []).some(p => p.id === id) ? cur : [...(cur || []), target], { sync: false });
+      toast.error("⚠ No se pudo eliminar en Supabase. Se restauró — revisa tu conexión e intenta de nuevo.");
     }
-    save("products", products.filter(item => item.id !== id));
   };
   const handleImg=e=>{ const file=e.target.files[0]; if(!file)return; const reader=new FileReader(); reader.onload=event=>setForm(current=>({...current,img:event.target.result})); reader.readAsDataURL(file); };
   const addCategory = () => {

@@ -27,37 +27,42 @@ export function Clientes({ D, save, user }) {
 
   const filtered=customers.filter(c=>`${c.name} ${c.market}`.toLowerCase().includes(q.toLowerCase()));
   const openForm=(c=null)=>{ setErr(""); setForm(c?{...c}:{name:"",phone:"",address:"",market:"",ci:"",notes:""}); setModal(c||"new"); };
+  // Optimista + sync:false: el servicio escribe en Supabase una sola vez (syncDiff no repite),
+  // la UI se actualiza al instante y se revierte si Supabase rechaza la operación.
   const doSave = async () => {
     if (!form.name.trim()) return;
     setErr("");
+    const needsRollback = res => res?._localOnly && isSupabaseUUID(user?.empresa_id);
     if (modal === "new") {
       const cliente = { ...form, id: generateId(), createdAt: new Date().toISOString() };
+      save("customers", cur => [...(cur || []), cliente], { sync: false });
+      setModal(null);
       const saved = await clientesService.createCliente(cliente, user?.empresa_id);
-      if (saved?._localOnly && isSupabaseUUID(user?.empresa_id)) {
-        setErr("⚠ Error al guardar en Supabase. Revisa la consola (F12).");
-        return;
+      if (needsRollback(saved)) {
+        save("customers", cur => (cur || []).filter(c => c.id !== cliente.id), { sync: false });
+        toast.error(`No se pudo guardar el cliente "${cliente.name}". Revisa tu conexión e intenta de nuevo.`);
       }
-      save("customers", [...customers, cliente]);
     } else {
-      const updated = { ...modal, ...form };
-      const saved = await clientesService.updateCliente(updated, user?.empresa_id).catch(e => { console.error("[Clientes] update:", e.message); return null; });
-      if (saved?._localOnly && isSupabaseUUID(user?.empresa_id)) {
-        setErr("⚠ Error al actualizar en Supabase. No se guardó — revisa tu conexión e intenta de nuevo.");
-        return;
+      const previous = customers.find(c => c.id === modal.id);
+      const updated = { ...previous, ...form };
+      save("customers", cur => (cur || []).map(c => c.id === updated.id ? { ...c, ...form } : c), { sync: false });
+      setModal(null);
+      const saved = await clientesService.updateCliente(updated, user?.empresa_id).catch(e => { console.error("[Clientes] update:", e.message); return { _localOnly: true }; });
+      if (needsRollback(saved)) {
+        save("customers", cur => (cur || []).map(c => c.id === updated.id ? previous : c), { sync: false });
+        toast.error("No se pudo actualizar el cliente. Se restauró — revisa tu conexión e intenta de nuevo.");
       }
-      save("customers", customers.map(c => c.id === modal.id ? { ...c, ...form } : c));
     }
-    setModal(null);
   };
   const doDelete = async (id) => {
+    const target = customers.find(c => c.id === id);
+    save("customers", cur => (cur || []).filter(c => c.id !== id), { sync: false });
+    setConfirmDel(null); setDetail(null);
     const res = await clientesService.deleteCliente(id, user?.empresa_id).catch(e => { console.error("[Clientes] delete:", e.message); return { ok: false, error: e.message }; });
     if (res?.ok === false) {
-      toast.error("⚠ No se pudo eliminar en Supabase. Revisa tu conexión e intenta de nuevo.");
-      setConfirmDel(null);
-      return;
+      if (target) save("customers", cur => (cur || []).some(c => c.id === id) ? cur : [...(cur || []), target], { sync: false });
+      toast.error("⚠ No se pudo eliminar en Supabase. Se restauró — revisa tu conexión e intenta de nuevo.");
     }
-    save("customers", customers.filter(c => c.id !== id));
-    setConfirmDel(null); setDetail(null);
   };
 
   const exportXLS=async()=>{

@@ -441,7 +441,13 @@ const init = async () => {
           inventory: Array.isArray(supaInventario)  && supaInventario.length   === 0,
           pedidos:   Array.isArray(supaPedidos)     && supaPedidos.length      === 0,
         };
-        if (Object.values(emptyEntities).some(Boolean)) {
+        // Solo una vez por empresa: antes corría en CADA login mientras alguna tabla
+        // siguiera vacía (ej. pedidos), disparando upserts innecesarios contra Supabase.
+        const migratedFlag = `moxi_migrated_${eid}`;
+        let alreadyMigrated = false;
+        try { alreadyMigrated = localStorage.getItem(migratedFlag) === "1"; } catch {}
+        if (!alreadyMigrated && Object.values(emptyEntities).some(Boolean)) {
+          try { localStorage.setItem(migratedFlag, "1"); } catch {}
           uploadLocalToSupabase(eid, emptyEntities).then(migrated => {
             if (cancelled || !Object.keys(migrated).length) return;
             setData(d => {
@@ -587,13 +593,21 @@ const init = async () => {
     return () => { supabase.removeChannel(ch); };
   }, [user?.empresa_id]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  const save=useCallback((key,value)=>{
+  // save(key, value | (actual) => nuevo, { sync })
+  //  - Acepta una función para actualizaciones optimistas y rollbacks sin pisar cambios concurrentes.
+  //  - sync:false → el componente ya escribió en Supabase con su servicio; evita que syncDiff
+  //    repita el INSERT/UPDATE/DELETE (esas escrituras dobles eran los 409 "duplicate key").
+  const save=useCallback((key,value,{ sync = true } = {})=>{
+    const prevValue = dataRef.current?.[key];
+    const next = typeof value === "function" ? value(prevValue) : value;
     // Sincronizar a Supabase si aplica (fire-and-forget, nunca bloquea UI)
-    if (SYNC_KEYS.has(key)) syncDiff(key, dataRef.current?.[key], value, userRef.current);
+    if (sync && SYNC_KEYS.has(key)) syncDiff(key, prevValue, next, userRef.current);
     // Actualizar moneda global al instante cuando se guarda config
-    if (key === "config" && value?.currency) applyCurrencyCode(value.currency);
-    setData(d=>({...d,[key]:value}));
-    persistValue(key, value);
+    if (key === "config" && next?.currency) applyCurrencyCode(next.currency);
+    // dataRef se actualiza en el acto para que dos save() seguidos partan del valor más reciente
+    if (dataRef.current) dataRef.current = { ...dataRef.current, [key]: next };
+    setData(d=>({...d,[key]:next}));
+    persistValue(key, next);
   },[]);
 
   const logAction=useCallback(action=>{

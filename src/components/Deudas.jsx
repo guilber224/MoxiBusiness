@@ -22,15 +22,18 @@ export function Deudas({ D, save, user, logAction }) {
     const a = Math.min(n(amt), sales.find(s => s.id === saleId)?.debt || 0); if (a <= 0) return;
     const updated = sales.map(s => s.id === saleId ? { ...s, paid: s.paid + a, debt: Math.max(0, s.debt - a), payments: [...(s.payments || []), { amount: a, date: new Date().toISOString() }] } : s);
     const ventaActualizada = updated.find(s => s.id === saleId);
+    const ventaPrevia = sales.find(s => s.id === saleId);
+    // Optimista: el cobro se refleja al instante; si Supabase lo rechaza se revierte.
+    save("sales", cur => (cur || []).map(s => s.id === saleId ? ventaActualizada : s));
+    setPays(p => ({ ...p, [saleId]: "" }));
     let result;
     try { result = await ventasService.updateVenta(saleId, ventaActualizada, user?.empresa_id); }
-    catch (e) { console.warn("Cobro deuda Supabase error:", e.message); }
+    catch (e) { console.warn("Cobro deuda Supabase error:", e.message); result = { _localOnly: true }; }
     if (result?._localOnly && isSupabaseUUID(user?.empresa_id)) {
+      save("sales", cur => (cur || []).map(s => s.id === saleId ? ventaPrevia : s));
       toast.error("⚠ Error Supabase al registrar el cobro. El pago no se guardó — revisa tu conexión e intenta de nuevo.");
       return;
     }
-    save("sales", updated);
-    setPays(p => ({ ...p, [saleId]: "" }));
     logAction?.(`${user.name} registró un cobro de deuda por ${Bs(a)} en la venta ${saleId}`);
   };
 

@@ -23,7 +23,8 @@ AS $$
   SELECT empresa_id FROM public.usuarios WHERE id = auth.uid() LIMIT 1;
 $$;
 
-CREATE OR REPLACE FUNCTION public.get_my_profile()
+DROP FUNCTION IF EXISTS public.get_my_profile();
+CREATE FUNCTION public.get_my_profile()
 RETURNS TABLE(id uuid, email text, nombre text, role text, empresa_id uuid)
 LANGUAGE sql
 STABLE

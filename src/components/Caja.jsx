@@ -38,44 +38,40 @@ export function Caja({ D, save, user, logAction, onRefreshDashboard }) {
   const balance = salesIncome + regIncome - totalExpense;
   const fondoEsperado = montoApertura + salesIncome + regIncome - totalExpense;
 
-  const doSave = async () => {
+  // Optimista: la entrada aparece al instante; si Supabase la rechaza se quita y se avisa.
+  const addEntry = async (entry, errorMsg) => {
+    save("expenses", cur => [entry, ...(cur || [])]);
+    onRefreshDashboard?.();
+    const saved = await gastosService.createGasto(entry, user.empresa_id).catch(e => ({ _localOnly: true, error: e.message }));
+    if (saved?._localOnly && isSupabaseUUID(user?.empresa_id)) {
+      save("expenses", cur => (cur || []).filter(e => e.id !== entry.id));
+      toast.error(errorMsg);
+    }
+  };
+
+  const doSave = () => {
     if (!form.description || !form.amount) return;
     const entry = { ...form, id: generateId(), amount: n(form.amount), responsable: user.name, createdAt: new Date().toISOString(), usuario_id: user.id };
-    const saved = await gastosService.createGasto(entry, user.empresa_id).catch(e => ({ _localOnly: true, error: e.message }));
-    if (saved?._localOnly && isSupabaseUUID(user?.empresa_id)) {
-      toast.error("Error al guardar el movimiento de caja. Revisa tu conexión e intenta de nuevo.");
-      return;
-    }
-    save("expenses", [entry, ...expenses]);
     logAction?.(`${user.name} registró un ${form.type === "ingreso" ? "ingreso" : "egreso"} de ${Bs(form.amount)} en caja`);
     setModal(false); setForm({ type: "gasto", category: "", description: "", amount: "", date: today(), notes: "" });
+    addEntry(entry, "No se pudo guardar el movimiento de caja. Revisa tu conexión e intenta de nuevo.");
   };
 
-  const doAbrirCaja = async () => {
+  const doAbrirCaja = () => {
     if (!cajaForm.amount && cajaForm.amount !== "0") return;
     const entry = { id: generateId(), type: "apertura_caja", category: "Apertura de caja", description: `Apertura de caja — fondo inicial: ${Bs(n(cajaForm.amount))}`, amount: n(cajaForm.amount), responsable: user.name, notes: cajaForm.notes, date: today(), createdAt: new Date().toISOString(), usuario_id: user.id };
-    const saved = await gastosService.createGasto(entry, user.empresa_id).catch(e => ({ _localOnly: true, error: e.message }));
-    if (saved?._localOnly && isSupabaseUUID(user?.empresa_id)) {
-      toast.error("Error al abrir la caja. Revisa tu conexión e intenta de nuevo.");
-      return;
-    }
-    save("expenses", [entry, ...expenses]);
     logAction?.(`${user.name} abrió la caja con fondo de ${Bs(n(cajaForm.amount))}`);
     setCajaModal(null); setCajaForm({ amount: "", notes: "" });
+    addEntry(entry, "No se pudo abrir la caja. Revisa tu conexión e intenta de nuevo.");
   };
 
-  const doCerrarCaja = async () => {
+  const doCerrarCaja = () => {
     const arqueo = n(cajaForm.amount);
     const diferencia = arqueo - fondoEsperado;
     const entry = { id: generateId(), type: "cierre_caja", category: "Cierre de caja", description: `Cierre de caja — arqueo: ${Bs(arqueo)} | esperado: ${Bs(fondoEsperado)} | diferencia: ${Bs(diferencia)}`, amount: arqueo, responsable: user.name, notes: cajaForm.notes, date: today(), createdAt: new Date().toISOString(), usuario_id: user.id };
-    const saved = await gastosService.createGasto(entry, user.empresa_id).catch(e => ({ _localOnly: true, error: e.message }));
-    if (saved?._localOnly && isSupabaseUUID(user?.empresa_id)) {
-      toast.error("Error al cerrar la caja. Revisa tu conexión e intenta de nuevo.");
-      return;
-    }
-    save("expenses", [entry, ...expenses]);
     logAction?.(`${user.name} cerró la caja. Arqueo: ${Bs(arqueo)}, diferencia: ${Bs(diferencia)}`);
     setCajaModal(null); setCajaForm({ amount: "", notes: "" });
+    addEntry(entry, "No se pudo cerrar la caja. Revisa tu conexión e intenta de nuevo.");
   };
 
   const filtered = filteredExpensesByPeriod.filter(e => { const mf = filter === "all" || e.type === filter || ((e.type === "apertura_caja" || e.type === "cierre_caja") && filter === "all"); const ms = `${e.description} ${e.category}`.toLowerCase().includes(q.toLowerCase()); return mf && ms && e.type !== "apertura_caja" && e.type !== "cierre_caja"; }).sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
@@ -83,16 +79,17 @@ export function Caja({ D, save, user, logAction, onRefreshDashboard }) {
 
   const removeExpense = async () => {
     if (!deleteTarget) return;
-    const res = await gastosService.deleteGasto(deleteTarget.id, user.empresa_id).catch(e => ({ ok: false, error: e.message }));
+    const target = deleteTarget;
+    save("expenses", cur => (cur || []).filter(item => item.id !== target.id));
+    setDeleteTarget(null);
+    onRefreshDashboard?.();
+    const res = await gastosService.deleteGasto(target.id, user.empresa_id).catch(e => ({ ok: false, error: e.message }));
     if (res?.ok === false) {
-      toast.error("No se pudo eliminar el movimiento. Revisa tu conexión e intenta de nuevo.");
-      setDeleteTarget(null);
+      save("expenses", cur => (cur || []).some(e => e.id === target.id) ? cur : [target, ...(cur || [])]);
+      toast.error("No se pudo eliminar el movimiento. Se restauró — revisa tu conexión e intenta de nuevo.");
       return;
     }
-    save("expenses", expenses.filter(item => item.id !== deleteTarget.id));
-    logAction?.(`${user.name} eliminó un movimiento de caja por ${Bs(deleteTarget.amount)}`);
-    onRefreshDashboard?.();
-    setDeleteTarget(null);
+    logAction?.(`${user.name} eliminó un movimiento de caja por ${Bs(target.amount)}`);
   };
 
   return (

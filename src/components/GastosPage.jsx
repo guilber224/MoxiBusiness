@@ -43,28 +43,31 @@ export function GastosPage({ D, save, user, logAction, onRefreshDashboard }) {
       category: form.category, date: new Date(form.date + "T12:00:00").toISOString(),
       notes: form.notes, type: "gasto", createdAt: new Date().toISOString(), empresa_id: user.empresa_id, usuario_id: user.id
     };
-    const saved = await gastosService.createGasto(gasto, user.empresa_id);
-    if (saved?._localOnly && isSupabaseUUID(user?.empresa_id)) {
-      toast.error("Error al guardar el gasto. Revisa tu conexión e intenta de nuevo.");
-      return;
-    }
-    save("expenses", [gasto, ...(expenses || [])]);
+    // Optimista: se muestra al instante y se sincroniza en segundo plano; si Supabase lo rechaza, se revierte.
+    save("expenses", cur => [gasto, ...(cur || [])]);
     logAction?.(`${user.name} registró gasto: ${form.description} ${Bs(n(form.amount))}`);
     setModal(false); setForm(FORM_RESET());
+    onRefreshDashboard?.();
+    const saved = await gastosService.createGasto(gasto, user.empresa_id).catch(e => ({ _localOnly: true, error: e.message }));
+    if (saved?._localOnly && isSupabaseUUID(user?.empresa_id)) {
+      save("expenses", cur => (cur || []).filter(e => e.id !== gasto.id));
+      toast.error(`No se pudo guardar el gasto "${gasto.description}". Revisa tu conexión e intenta de nuevo.`);
+    }
   };
 
   const doDelete = async () => {
     if (!deleteTarget) return;
-    const res = await gastosService.deleteGasto(deleteTarget.id, user.empresa_id).catch(e => ({ ok: false, error: e.message }));
+    const target = deleteTarget;
+    save("expenses", cur => (cur || []).filter(e => e.id !== target.id));
+    setDeleteTarget(null);
+    onRefreshDashboard?.();
+    const res = await gastosService.deleteGasto(target.id, user.empresa_id).catch(e => ({ ok: false, error: e.message }));
     if (res?.ok === false) {
-      toast.error("No se pudo eliminar el gasto. Revisa tu conexión e intenta de nuevo.");
-      setDeleteTarget(null);
+      save("expenses", cur => (cur || []).some(e => e.id === target.id) ? cur : [target, ...(cur || [])]);
+      toast.error("No se pudo eliminar el gasto. Se restauró — revisa tu conexión e intenta de nuevo.");
       return;
     }
-    save("expenses", (expenses || []).filter(e => e.id !== deleteTarget.id));
-    logAction?.(`${user.name} eliminó gasto: ${deleteTarget.description}`);
-    onRefreshDashboard?.();
-    setDeleteTarget(null);
+    logAction?.(`${user.name} eliminó gasto: ${target.description}`);
   };
 
   return (

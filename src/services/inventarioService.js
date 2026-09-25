@@ -18,7 +18,7 @@ export const inventarioService = {
       return data || [];
     } catch (e) {
       console.warn("fallback getInventario:", e.message);
-      if (isSupabaseUUID(empresaId)) return [];
+      if (isSupabaseUUID(empresaId)) return null;
       return getLocal(empresaId);
     }
   },
