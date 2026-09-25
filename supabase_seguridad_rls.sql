@@ -27,7 +27,7 @@ $$;
 
 CREATE OR REPLACE FUNCTION public.is_superadmin()
 RETURNS boolean LANGUAGE sql STABLE SECURITY DEFINER SET search_path = public AS $$
-  SELECT coalesce(lower(role) = 'superadmin', false) FROM public.usuarios WHERE id = auth.uid() LIMIT 1;
+  SELECT coalesce(lower(role::text) = 'superadmin', false) FROM public.usuarios WHERE id = auth.uid() LIMIT 1;
 $$;
 
 -- Helper temporal: borra todas las políticas existentes de una tabla (nombres de scripts anteriores)
