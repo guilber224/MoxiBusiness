@@ -1,4 +1,4 @@
-﻿import { useState, useEffect, useRef, useMemo, useCallback } from "react";
+﻿import { useState, useEffect, useRef, useMemo, useCallback, lazy, Suspense } from "react";
 import { supabase } from './lib/supabaseClient';
 import { ventasService } from "./services/ventasService.js";
 import { userService } from "./services/userService.js";
@@ -8,7 +8,7 @@ import { inventarioService } from "./services/inventarioService.js";
 import { gastosService } from "./services/gastosService.js";
 import { movimientosService } from "./services/movimientosService.js";
 import { pedidosService } from "./services/pedidosService.js";
-import { saveLastEmpresaId, migrateLegacyStorageIfNeeded } from "./utils/storageScope.js";
+import { saveLastEmpresaId, migrateLegacyStorageIfNeeded, isSupabaseUUID } from "./utils/storageScope.js";
 import { isSupabaseUser, normalizeSales, normalizeCustomers, normalizeUsers, mergeById } from "./utils/businessLogic.js";
 import { Toaster } from "react-hot-toast";
 import { applyCurrencyCode, resetCurrency } from "./currency.js";
@@ -19,32 +19,50 @@ import { useIsMobile } from "./hooks/useIsMobile.js";
 import { BrandLogo } from "./components/ui/BrandLogo.jsx";
 import { BottomNav } from "./components/BottomNav.jsx";
 import { NAV_GROUPS, ROLES } from "./navConfig.js";
-import { Clientes } from "./components/Clientes.jsx";
-import { Productos } from "./components/Productos.jsx";
-import { Inventario } from "./components/Inventario.jsx";
-import { DashboardPremium } from "./components/DashboardPremium.jsx";
-import { Ventas } from "./components/Ventas.jsx";
-import { Pedidos } from "./components/Pedidos.jsx";
-import { Deudas } from "./components/Deudas.jsx";
-import { Produccion } from "./components/Produccion.jsx";
-import { Proveedores } from "./components/Proveedores.jsx";
-import { GastosPage } from "./components/GastosPage.jsx";
-import { Caja } from "./components/Caja.jsx";
-import { Analisis } from "./components/Analisis.jsx";
-import { Exportar } from "./components/Exportar.jsx";
 import { AuthScreen } from "./screens/AuthScreen.jsx";
-import { ResetPasswordScreen } from "./screens/ResetPasswordScreen.jsx";
 import { OnboardingIncompleteScreen } from "./screens/OnboardingIncompleteScreen.jsx";
 import { Sidebar } from "./components/Sidebar.jsx";
-import { UsuariosAdmin } from "./components/UsuariosAdmin.jsx";
-import { SuperAdminPanel } from "./components/SuperAdminPanel.jsx";
 import { Topbar } from "./components/Topbar.jsx";
 import { SuscripcionVencida } from "./screens/SuscripcionVencida.jsx";
 import { suscripcionService } from "./services/suscripcionService.js";
 import { loadStoredValue, persistValue, cacheSupabaseData, buildActivityEntry, DEFAULT_CONFIG, DEFAULT_ACTIVITY_LOGS } from "./utils/appStorage.js";
 import { syncDiff, SYNC_KEYS, createEmptyAppState } from "./utils/syncDiff.js";
 import { invalidateAnalyticsCache } from "./services/analyticsService.js";
+import { recordLocalChange, reconcileWithServer, resetLocalChanges } from "./utils/localChanges.js";
 import { PRODUCTS0, FORMULAS0, CUSTOMERS0, DEFAULT_USERS } from "./seedData.js";
+
+// Tras publicar una versión nueva, una pestaña abierta con la versión vieja pide archivos
+// que ya no existen → recargar la página una vez para obtener la versión actual.
+const lazyWithReload = (factory) => lazy(() => factory().then(mod => {
+  try { sessionStorage.removeItem("moxi_chunk_reload"); } catch {}
+  return mod;
+}, err => {
+  const flag = "moxi_chunk_reload";
+  let reloaded = false;
+  try { reloaded = sessionStorage.getItem(flag) === "1"; sessionStorage.setItem(flag, "1"); } catch {}
+  if (!reloaded) { window.location.reload(); return new Promise(() => {}); }
+  throw err;
+}));
+
+// Secciones cargadas bajo demanda: el código de cada una se descarga la primera vez que se
+// abre, en lugar de ir todo en un solo archivo de 1,2 MB al entrar. El login no necesita
+// gráficas ni animaciones, así que incluso el Dashboard se carga después de entrar.
+const DashboardPremium = lazyWithReload(() => import("./components/DashboardPremium.jsx").then(m => ({ default: m.DashboardPremium })));
+const Clientes = lazyWithReload(() => import("./components/Clientes.jsx").then(m => ({ default: m.Clientes })));
+const Productos = lazyWithReload(() => import("./components/Productos.jsx").then(m => ({ default: m.Productos })));
+const Inventario = lazyWithReload(() => import("./components/Inventario.jsx").then(m => ({ default: m.Inventario })));
+const Ventas = lazyWithReload(() => import("./components/Ventas.jsx").then(m => ({ default: m.Ventas })));
+const Pedidos = lazyWithReload(() => import("./components/Pedidos.jsx").then(m => ({ default: m.Pedidos })));
+const Deudas = lazyWithReload(() => import("./components/Deudas.jsx").then(m => ({ default: m.Deudas })));
+const Produccion = lazyWithReload(() => import("./components/Produccion.jsx").then(m => ({ default: m.Produccion })));
+const Proveedores = lazyWithReload(() => import("./components/Proveedores.jsx").then(m => ({ default: m.Proveedores })));
+const GastosPage = lazyWithReload(() => import("./components/GastosPage.jsx").then(m => ({ default: m.GastosPage })));
+const Caja = lazyWithReload(() => import("./components/Caja.jsx").then(m => ({ default: m.Caja })));
+const Analisis = lazyWithReload(() => import("./components/Analisis.jsx").then(m => ({ default: m.Analisis })));
+const Exportar = lazyWithReload(() => import("./components/Exportar.jsx").then(m => ({ default: m.Exportar })));
+const UsuariosAdmin = lazyWithReload(() => import("./components/UsuariosAdmin.jsx").then(m => ({ default: m.UsuariosAdmin })));
+const SuperAdminPanel = lazyWithReload(() => import("./components/SuperAdminPanel.jsx").then(m => ({ default: m.SuperAdminPanel })));
+const ResetPasswordScreen = lazyWithReload(() => import("./screens/ResetPasswordScreen.jsx").then(m => ({ default: m.ResetPasswordScreen })));
 
 // Lee datos de cualquier clave localStorage disponible.
 // Busca en: clave global moxi_*, legacy ah_*, y CUALQUIER clave moxi_*_suffix del navegador.
@@ -55,11 +73,13 @@ const getLocalFallbackData = (primaryKey, legacyKey = null) => {
   // Candidatos explícitos primero
   const candidates = [primaryKey, legacyKey].filter(Boolean);
 
-  // Luego escanear TODAS las claves moxi_*_<tipo> del localStorage (recuperación amplia)
+  // Luego escanear claves moxi_<id>_<tipo> de cuentas LOCALES antiguas (ej: moxi_huacareta_products).
+  // Nunca claves de cuentas Supabase (id UUID): son la caché de OTRA empresa en este navegador,
+  // y subirlas mezclaba datos entre empresas.
   if (suffix) {
     try {
       Object.keys(localStorage).forEach(k => {
-        if (k !== primaryKey && k.startsWith("moxi_") && k.endsWith(suffix)) {
+        if (k !== primaryKey && k.startsWith("moxi_") && k.endsWith(suffix) && !isSupabaseUUID(k.slice(5, 41))) {
           candidates.push(k);
         }
       });
@@ -137,6 +157,76 @@ const uploadLocalToSupabase = async (empresaId, entities) => {
   return result;
 };
 
+// Lee del localStorage el estado cacheado de la empresa activa (getCurrentEmpresaId).
+// Se usa al montar y cada vez que cambia la empresa (otro usuario inicia sesión en el
+// mismo navegador): antes el estado de la cuenta anterior quedaba en pantalla.
+const loadCachedState = async () => {
+  // Migrar datos globales → scope ANTES de leerlos (orden crítico).
+  // Sin esto, la primera carga tras login Supabase veía claves vacías.
+  if (getCurrentEmpresaId()) migrateLegacyStorageIfNeeded(getCurrentEmpresaId());
+
+  const hasScope = Boolean(getCurrentEmpresaId());
+  // Categorías vacías para cuentas Supabase — el usuario define las suyas propias.
+  const catFallback = hasScope
+    ? [{ id: DEFAULT_CATEGORY_ID, name: "Sin categoría", locked: true }]
+    : DEFAULT_CATEGORIES;
+
+  const [
+    rawCustomers,
+    rawProducts,
+    inventory,
+    rawSales,
+    suppliers,
+    purchases,
+    formulas,
+    orders,
+    pedidos,
+    expenses,
+    movements,
+    storedCategories,
+    rawUsers,
+    config,
+    activityLogs
+  ] = await Promise.all([
+    loadStoredValue("customers", hasScope ? [] : CUSTOMERS0),
+    loadStoredValue("products",  hasScope ? [] : PRODUCTS0),
+    loadStoredValue("inventory", hasScope ? [] : PRODUCTS0.map(p=>({productId:p.id,stock:0}))),
+    loadStoredValue("sales",     []),
+    loadStoredValue("suppliers", []),
+    loadStoredValue("purchases", []),
+    loadStoredValue("formulas",  hasScope ? [] : FORMULAS0),
+    loadStoredValue("orders",    []),
+    loadStoredValue("pedidos",   []),
+    loadStoredValue("expenses",  []),
+    loadStoredValue("movements", []),
+    loadStoredValue("categories", catFallback),
+    loadStoredValue("users",     DEFAULT_USERS),
+    loadStoredValue("config",    DEFAULT_CONFIG),
+    loadStoredValue("activityLogs", DEFAULT_ACTIVITY_LOGS),
+  ]);
+
+  const cats = ensureCategories(storedCategories, rawProducts);
+  // Aplicar moneda guardada antes del primer render
+  if (config?.currency) applyCurrencyCode(config.currency);
+  return {
+    customers:    normalizeCustomers(rawCustomers),
+    products:     sanitizeProducts(rawProducts, cats),
+    inventory,
+    sales:        normalizeSales(rawSales),
+    suppliers,
+    purchases,
+    formulas,
+    orders,
+    pedidos,
+    expenses,
+    movements,
+    categories:   cats,
+    users:        normalizeUsers(rawUsers),
+    config,
+    activityLogs,
+  };
+};
+
 export default function App() {
   const [user,setUser]=useState(null);
   const [tab,setTab]=useState("dashboard");
@@ -159,6 +249,8 @@ export default function App() {
   // Refs para acceder a user/data actuales dentro de callbacks sin stale closures
   const userRef = useRef(null);
   const dataRef = useRef(null);
+  // Empresa cuya caché local está cargada en `data`
+  const loadedScopeRef = useRef(undefined);
   useEffect(() => { userRef.current = user; }, [user]);
   useEffect(() => { if (data) dataRef.current = data; }, [data]);
   useEffect(() => { setMountedTabs(prev => { if (prev.has(tab)) return prev; const next = new Set(prev); next.add(tab); return next; }); }, [tab]);
@@ -178,6 +270,16 @@ export default function App() {
       setCurrentEmpresaId(user.empresa_id);
       saveLastEmpresaId(user.empresa_id);
       migrateLegacyStorageIfNeeded(user.empresa_id);
+      // Si la caché en pantalla es de otra empresa (último usuario de este navegador), recargarla
+      if (loadedScopeRef.current !== user.empresa_id) {
+        const scope = user.empresa_id;
+        loadedScopeRef.current = scope;
+        loadCachedState().then(state => {
+          if (loadedScopeRef.current !== scope) return;
+          dataRef.current = state;
+          setData(state);
+        });
+      }
     }
   }, [user?.empresa_id]);
 
@@ -185,6 +287,8 @@ export default function App() {
     // Hard reset: limpiar TODO síncronamente antes de signOut.
     // Orden crítico: refs primero (para SIGNED_OUT handler), luego React state.
     setCurrentEmpresaId(null);
+    resetLocalChanges();
+    loadedScopeRef.current = null;
     userRef.current   = null;
     dataRef.current   = null;
     setUser(null);
@@ -241,72 +345,9 @@ const init = async () => {
 
 // Carga inicial desde localStorage — corre una vez al montar, sin depender de user
   useEffect(()=>{
-    (async()=>{
-      // Migrar datos globales → scope ANTES de leerlos (orden crítico).
-      // Sin esto, la primera carga tras login Supabase veía claves vacías.
-      if (getCurrentEmpresaId()) migrateLegacyStorageIfNeeded(getCurrentEmpresaId());
-
-      const hasScope = Boolean(getCurrentEmpresaId());
-      // Categorías vacías para cuentas Supabase — el usuario define las suyas propias.
-      const catFallback = hasScope
-        ? [{ id: DEFAULT_CATEGORY_ID, name: "Sin categoría", locked: true }]
-        : DEFAULT_CATEGORIES;
-
-      const [
-        rawCustomers,
-        rawProducts,
-        inventory,
-        rawSales,
-        suppliers,
-        purchases,
-        formulas,
-        orders,
-        pedidos,
-        expenses,
-        movements,
-        storedCategories,
-        rawUsers,
-        config,
-        activityLogs
-      ] = await Promise.all([
-        loadStoredValue("customers", hasScope ? [] : CUSTOMERS0),
-        loadStoredValue("products",  hasScope ? [] : PRODUCTS0),
-        loadStoredValue("inventory", hasScope ? [] : PRODUCTS0.map(p=>({productId:p.id,stock:0}))),
-        loadStoredValue("sales",     []),
-        loadStoredValue("suppliers", []),
-        loadStoredValue("purchases", []),
-        loadStoredValue("formulas",  hasScope ? [] : FORMULAS0),
-        loadStoredValue("orders",    []),
-        loadStoredValue("pedidos",   []),
-        loadStoredValue("expenses",  []),
-        loadStoredValue("movements", []),
-        loadStoredValue("categories", catFallback),
-        loadStoredValue("users",     DEFAULT_USERS),
-        loadStoredValue("config",    DEFAULT_CONFIG),
-        loadStoredValue("activityLogs", DEFAULT_ACTIVITY_LOGS),
-      ]);
-
-      const cats = ensureCategories(storedCategories, rawProducts);
-      // Aplicar moneda guardada antes del primer render
-      if (config?.currency) applyCurrencyCode(config.currency);
-      setData({
-        customers:    normalizeCustomers(rawCustomers),
-        products:     sanitizeProducts(rawProducts, cats),
-        inventory,
-        sales:        normalizeSales(rawSales),
-        suppliers,
-        purchases,
-        formulas,
-        orders,
-        pedidos,
-        expenses,
-        movements,
-        categories:   cats,
-        users:        normalizeUsers(rawUsers),
-        config,
-        activityLogs,
-      });
-    })();
+    const scope = getCurrentEmpresaId();
+    loadedScopeRef.current = scope;
+    loadCachedState().then(state => { if (loadedScopeRef.current === scope) setData(state); });
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Restaurar sesión Supabase en paralelo — si hay sesión activa, setea user sin bloquear UI
@@ -381,7 +422,7 @@ const init = async () => {
     let cancelled = false;
     let retryTimer = null;
 
-    const applyData = (supaClientes, supaProductos, supaInventario, supaGastos, supaMovimientos, scopedConfig, supaPedidos) => {
+    const applyData = (requestedAt, supaClientes, supaProductos, supaInventario, supaGastos, supaMovimientos, scopedConfig, supaPedidos) => {
       if (cancelled) return;
       setData(d => {
         if (!d) return d;
@@ -390,20 +431,39 @@ const init = async () => {
         // null  = Supabase falló o timeout → conservar caché local
         // []    = Supabase respondió vacío → NO sobreescribir si tenemos datos en caché
         //         (evita borrar datos salvados localmente cuando RLS o columnas fallan)
-        // [...]  = Supabase tiene datos → actualizar y cachear
-        if (Array.isArray(supaClientes)    && supaClientes.length    > 0) { next.customers  = normalizeCustomers(supaClientes);      cacheSupabaseData("customers",  supaClientes,    eid); }
-        if (Array.isArray(supaProductos)   && supaProductos.length   > 0) { next.products   = sanitizeProducts(supaProductos, cats); cacheSupabaseData("products",   supaProductos,   eid); }
-        if (Array.isArray(supaInventario)  && supaInventario.length  > 0) { next.inventory  = supaInventario;                        cacheSupabaseData("inventory",  supaInventario,  eid); }
-        if (Array.isArray(supaGastos)      && supaGastos.length      > 0) { next.expenses   = supaGastos;                            cacheSupabaseData("expenses",   supaGastos,      eid); }
-        if (Array.isArray(supaMovimientos) && supaMovimientos.length > 0) { next.movements  = supaMovimientos;                       cacheSupabaseData("movements",  supaMovimientos, eid); }
-        if (Array.isArray(supaPedidos)     && supaPedidos.length     > 0) { next.pedidos    = supaPedidos;                           cacheSupabaseData("pedidos",    supaPedidos,     eid); }
-        if (scopedConfig)                                                   next.config      = scopedConfig;
+        // [...]  = Supabase tiene datos → combinar con los cambios locales hechos mientras
+        //          se esperaba la respuesta (si no, un producto recién creado desaparecía)
+        const apply = (key, rows, normalize = x => x) => {
+          if (!Array.isArray(rows) || rows.length === 0) return;
+          next[key] = reconcileWithServer(key, normalize(rows), d[key], requestedAt);
+          cacheSupabaseData(key, next[key], eid);
+        };
+        apply("customers", supaClientes,    normalizeCustomers);
+        apply("products",  supaProductos,   rows => sanitizeProducts(rows, cats));
+        apply("inventory", supaInventario);
+        apply("expenses",  supaGastos);
+        apply("movements", supaMovimientos);
+        apply("pedidos",   supaPedidos);
+        if (scopedConfig) next.config = scopedConfig;
+        dataRef.current = next;
         return next;
       });
       if (scopedConfig?.currency) applyCurrencyCode(scopedConfig.currency);
     };
 
+    const applySales = (requestedAt, supaVentas) => {
+      setData(d => {
+        if (!d) return d;
+        const sales = reconcileWithServer("sales", normalizeSales(supaVentas), d.sales, requestedAt);
+        cacheSupabaseData("sales", sales, eid);
+        const next = { ...d, sales };
+        dataRef.current = next;
+        return next;
+      });
+    };
+
     const doFetch = (isRetry) => {
+      const requestedAt = Date.now();
       const T = (p) => Promise.race([p, new Promise(r => setTimeout(() => r(null), isRetry ? 8000 : 5000))]);
 
       const ventasRace = isRetry ? null : Promise.race([
@@ -421,14 +481,11 @@ const init = async () => {
         T(pedidosService.getPedidos(eid)),
         isRetry ? T(ventasService.getVentas(eid)) : Promise.resolve(null),
       ]).then(([supaClientes, supaProductos, supaInventario, supaGastos, supaMovimientos, scopedConfig, supaPedidos, retryVentas]) => {
-        applyData(supaClientes, supaProductos, supaInventario, supaGastos, supaMovimientos, scopedConfig, supaPedidos);
+        applyData(requestedAt, supaClientes, supaProductos, supaInventario, supaGastos, supaMovimientos, scopedConfig, supaPedidos);
 
         // Ventas del retry aplicadas directamente
         if (isRetry) {
-          if (Array.isArray(retryVentas) && retryVentas.length > 0) {
-            setData(d => d ? { ...d, sales: normalizeSales(retryVentas) } : d);
-            cacheSupabaseData("sales", retryVentas, eid);
-          }
+          if (Array.isArray(retryVentas) && retryVentas.length > 0 && !cancelled) applySales(requestedAt, retryVentas);
           if (!cancelled) setSalesLoading(false);
         }
 
@@ -481,12 +538,14 @@ const init = async () => {
           .then(supaVentas => {
             if (cancelled) return;
             if (Array.isArray(supaVentas) && supaVentas.length > 0) {
-              // Supabase tiene ventas — actualizar estado y cachear
-              setData(d => d ? { ...d, sales: normalizeSales(supaVentas) } : d);
-              cacheSupabaseData("sales", supaVentas, eid);
+              // Supabase tiene ventas — combinar con las ventas locales recientes y cachear
+              applySales(requestedAt, supaVentas);
             } else if (Array.isArray(supaVentas) && supaVentas.length === 0) {
-              // Supabase vacío — intentar migrar ventas locales si hay
-              const localSales = getLocalFallbackData("moxi_sales", "ah_sales");
+              // Supabase vacío — intentar migrar ventas locales (solo una vez por empresa)
+              const salesFlag = `moxi_migrated_sales_${eid}`;
+              let salesMigrated = false;
+              try { salesMigrated = localStorage.getItem(salesFlag) === "1"; localStorage.setItem(salesFlag, "1"); } catch {}
+              const localSales = salesMigrated ? [] : getLocalFallbackData("moxi_sales", "ah_sales");
               if (localSales.length > 0) {
                 const rows = localSales.filter(v => v?.id).map(({ _localOnly, ...v }) => ({
                   ...v, empresa_id: eid, createdAt: v.createdAt || v.date || new Date().toISOString()
@@ -602,6 +661,8 @@ const init = async () => {
     const next = typeof value === "function" ? value(prevValue) : value;
     // Sincronizar a Supabase si aplica (fire-and-forget, nunca bloquea UI)
     if (sync && SYNC_KEYS.has(key)) syncDiff(key, prevValue, next, userRef.current);
+    // Anotar el cambio para que una carga de Supabase en curso no lo pise al llegar
+    recordLocalChange(key, prevValue, next);
     // Actualizar moneda global al instante cuando se guarda config
     if (key === "config" && next?.currency) applyCurrencyCode(next.currency);
     // dataRef se actualiza en el acto para que dos save() seguidos partan del valor más reciente
@@ -624,10 +685,14 @@ const init = async () => {
     setSalesLoading(true);
     setSalesError(false);
     try {
+      const requestedAt = Date.now();
       const supaVentas = await ventasService.getVentas(user.empresa_id);
       if (Array.isArray(supaVentas)) {
-        setData(d => ({ ...d, sales: normalizeSales(supaVentas) }));
-        cacheSupabaseData("sales", supaVentas, user.empresa_id);
+        setData(d => {
+          const sales = reconcileWithServer("sales", normalizeSales(supaVentas), d?.sales, requestedAt);
+          cacheSupabaseData("sales", sales, user.empresa_id);
+          return { ...d, sales };
+        });
       } else {
         setSalesError(true);
       }
@@ -665,7 +730,7 @@ const init = async () => {
     </div>
   );
   if(!data || !sessionChecked) return loadingScreen;
-  if(recoveryMode) return <ResetPasswordScreen onDone={() => setRecoveryMode(false)} />;
+  if(recoveryMode) return <Suspense fallback={loadingScreen}><ResetPasswordScreen onDone={() => setRecoveryMode(false)} /></Suspense>;
   // isRestoringSession: hay sesión activa pero el perfil aún se está cargando — no mostrar AuthScreen
   if(!user && isRestoringSession) return loadingScreen;
   if(!user) return <AuthScreen config={data.config} onLogin={loginUser} saveConfig={value=>save("config", value)}/>;
@@ -730,6 +795,7 @@ const init = async () => {
                sin re-cómputo de useMemo, sin llamadas al servidor. */}
           <main style={{ flex: 1, overflowY: "auto", padding: isMobile ? "14px 14px 80px" : "28px 32px", minWidth: 0 }}>
             <div style={{ maxWidth: 1400, margin: "0 auto" }}>
+              <Suspense fallback={<div style={{ padding: 40, textAlign: "center", color: "var(--color-text-faint)", fontSize: 13 }}>Cargando…</div>}>
               {mountedTabs.has("dashboard")   && <div style={{ display: tab === "dashboard"   ? "" : "none" }}><DashboardPremium D={data} setTab={setTab} user={user} refreshTrigger={rtRefreshTrigger} /></div>}
               {mountedTabs.has("clientes")    && <div style={{ display: tab === "clientes"    ? "" : "none" }}><Clientes D={data} save={save} user={user} /></div>}
               {mountedTabs.has("ventas")      && <div style={{ display: tab === "ventas"      ? "" : "none" }}><Ventas D={data} save={save} user={user} config={data.config} logAction={logAction} onRefreshDashboard={()=>{ invalidateAnalyticsCache(); setRtRefreshTrigger(t=>t+1); }} onReloadSales={reloadSales} salesLoading={salesLoading} salesError={salesError} /></div>}
@@ -745,6 +811,7 @@ const init = async () => {
               {mountedTabs.has("exportar")    && <div style={{ display: tab === "exportar"    ? "" : "none" }}><Exportar D={data} /></div>}
               {mountedTabs.has("usuarios")    && <div style={{ display: tab === "usuarios"    ? "" : "none" }}><UsuariosAdmin D={data} save={save} user={user} logAction={logAction} onProfileUpdate={newName=>setUser(u=>({...u,name:newName}))} /></div>}
               {mountedTabs.has("superadmin")  && <div style={{ display: tab === "superadmin"  ? "" : "none" }}><SuperAdminPanel /></div>}
+              </Suspense>
             </div>
           </main>
 

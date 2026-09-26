@@ -56,6 +56,13 @@ export const DEFAULT_ACTIVITY_LOGS = [];
 const isEmptyArray = (v) => Array.isArray(v) && v.length === 0;
 
 export const loadStoredValue = async (key, fallback) => {
+  // Cuentas Supabase: SOLO su propia caché. Nunca leer claves globales, legacy ni de otras
+  // cuentas — en un navegador compartido eso mostraba datos de OTRA empresa. Los datos
+  // locales antiguos se suben a Supabase una sola vez en el login (uploadLocalToSupabase).
+  if (isSupabaseScope()) {
+    const scoped = await DB.get(getScopedStorageKey(key, getCurrentEmpresaId()), undefined);
+    return scoped !== undefined ? scoped : fallback;
+  }
   if (getCurrentEmpresaId()) {
     // 1. Clave scoped del usuario actual (caché post-hidratación)
     const scoped = await DB.get(getScopedStorageKey(key, getCurrentEmpresaId()), undefined);
@@ -76,13 +83,13 @@ export const loadStoredValue = async (key, fallback) => {
       if (legacy !== undefined && !isEmptyArray(legacy)) return legacy;
     }
 
-    // 4. Escanear TODAS las claves moxi_*_<baseKey> del localStorage
-    //    — recupera datos de cualquier cuenta (ej: moxi_huacareta_products)
+    // 4. Escanear claves moxi_<id>_<baseKey> de cuentas LOCALES antiguas (ej: moxi_huacareta_products).
+    //    Nunca claves de cuentas Supabase (id UUID): pertenecen a otras empresas.
     if (STORAGE_KEYS[key]) {
       const suffix = `_${key}`;
       try {
         for (const k of Object.keys(localStorage)) {
-          if (k !== getScopedStorageKey(key, getCurrentEmpresaId()) && k.startsWith("moxi_") && k.endsWith(suffix)) {
+          if (k !== getScopedStorageKey(key, getCurrentEmpresaId()) && k.startsWith("moxi_") && k.endsWith(suffix) && !isSupabaseUUID(k.slice(5, 41))) {
             const v = await DB.get(k, undefined);
             if (v !== undefined && !isEmptyArray(v)) return v;
           }

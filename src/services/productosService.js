@@ -38,6 +38,7 @@ export const productosService = {
       return id ? { id, empresa_id, ...baseFields } : { empresa_id, ...baseFields };
     })();
 
+    let lastError = null;
     for (let attempt = 0; attempt < 15; attempt++) {
       const { data, error } = await supabase
         .from("productos")
@@ -59,6 +60,7 @@ export const productosService = {
 
       // Error no recuperable — loguear y salir del loop
       console.error("[productosService] UPSERT error:", error.code, error.message);
+      lastError = error;
       break;
     }
 
@@ -66,7 +68,7 @@ export const productosService = {
     const local = getLocal(eid);
     const idx = local.findIndex(p => p.id === producto.id);
     setLocal(idx >= 0 ? local.map((p, i) => i === idx ? producto : p) : [...local, producto], eid);
-    return { ...producto, _localOnly: true };
+    return { ...producto, _localOnly: true, _error: lastError?.message || "sin conexión" };
   },
 
   async deleteProducto(id, empresaId) {

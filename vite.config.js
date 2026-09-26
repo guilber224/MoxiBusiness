@@ -36,10 +36,35 @@ export default defineConfig({
       },
       workbox: {
         globPatterns: ['**/*.{js,css,html,ico,svg,woff2}'],
+        // Librerías pesadas que solo se usan al exportar/imprimir/escanear: no se descargan
+        // al instalar la app (eran ~1,2 MB extra en datos móviles); se cachean al usarlas.
+        globIgnores: ['**/xlsx-*.js', '**/jspdf*.js', '**/html2canvas*.js', '**/purify*.js', '**/index.es-*.js', '**/zxing-*.js'],
         navigateFallback: 'index.html',
         navigateFallbackDenylist: [/^\/api\//],
-        runtimeCaching: [],
+        runtimeCaching: [
+          {
+            urlPattern: ({ url }) => url.pathname.startsWith('/assets/'),
+            handler: 'CacheFirst',
+            options: { cacheName: 'moxi-assets', expiration: { maxEntries: 60, maxAgeSeconds: 60 * 60 * 24 * 60 } },
+          },
+        ],
       },
     }),
   ],
+  build: {
+    rollupOptions: {
+      output: {
+        // Librerías en archivos propios: cambian poco, así el navegador las reutiliza de caché
+        // entre versiones y solo descarga de nuevo el código de la app.
+        manualChunks(id) {
+          if (!id.includes('node_modules')) return;
+          if (/[\\/]node_modules[\\/](react|react-dom|scheduler)[\\/]/.test(id)) return 'react';
+          if (id.includes('@supabase')) return 'supabase';
+          if (id.includes('recharts') || id.includes('d3-') || id.includes('victory-vendor')) return 'charts';
+          if (id.includes('framer-motion') || id.includes('motion-dom') || id.includes('motion-utils')) return 'motion';
+          if (id.includes('@zxing')) return 'zxing';
+        },
+      },
+    },
+  },
 })

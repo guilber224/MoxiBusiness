@@ -42,22 +42,27 @@ export function Productos({ D, save, user }) {
     setProdErr("");
     const nextProduct = { ...form, price:n(form.price), cost:n(form.cost)||0, minStock:n(form.minStock), cat:form.cat||DEFAULT_CATEGORY_ID };
     // Optimista + sync:false: se muestra al instante y el servicio sube a Supabase una sola vez
-    // (antes syncDiff repetía el mismo upsert). Si falla, el producto queda guardado localmente.
+    // (antes syncDiff repetía el mismo upsert). Si Supabase lo rechaza se revierte y se muestra
+    // el motivo: antes quedaba "guardado localmente" y la siguiente carga lo hacía desaparecer.
+    const failed = saved => saved?._localOnly && isSupabaseUUID(user?.empresa_id);
     if (modal === "new") {
       const producto = { ...nextProduct, id: generateId(), empresa_id: user?.empresa_id };
       save("products", cur => [...(cur || []), { ...nextProduct, id: producto.id }], { sync: false });
       setModal(null);
       const saved = await productosService.upsertProducto(producto);
-      if (saved?._localOnly && isSupabaseUUID(user?.empresa_id)) {
-        toast.error("Producto guardado localmente. Para sincronizar con Supabase ejecuta supabase_nuevas_columnas.sql");
+      if (failed(saved)) {
+        save("products", cur => (cur || []).filter(p => p.id !== producto.id), { sync: false });
+        toast.error(`No se pudo guardar "${producto.name}" (${saved._error}). Intenta de nuevo.`, { duration: 7000 });
       }
     } else {
-      const producto = { ...products.find(p => p.id === modal.id), ...nextProduct, empresa_id: user?.empresa_id };
+      const previous = products.find(p => p.id === modal.id);
+      const producto = { ...previous, ...nextProduct, empresa_id: user?.empresa_id };
       save("products", cur => (cur || []).map(p => p.id === producto.id ? { ...p, ...nextProduct } : p), { sync: false });
       setModal(null);
       const saved = await productosService.upsertProducto(producto);
-      if (saved?._localOnly && isSupabaseUUID(user?.empresa_id)) {
-        toast.error("Edición guardada localmente. No se pudo sincronizar con Supabase.");
+      if (failed(saved)) {
+        save("products", cur => (cur || []).map(p => p.id === producto.id ? previous : p), { sync: false });
+        toast.error(`No se pudo guardar la edición de "${producto.name}" (${saved._error}). Se restauró.`, { duration: 7000 });
       }
     }
   };
@@ -70,7 +75,29 @@ export function Productos({ D, save, user }) {
       toast.error("⚠ No se pudo eliminar en Supabase. Se restauró — revisa tu conexión e intenta de nuevo.");
     }
   };
-  const handleImg=e=>{ const file=e.target.files[0]; if(!file)return; const reader=new FileReader(); reader.onload=event=>setForm(current=>({...current,img:event.target.result})); reader.readAsDataURL(file); };
+  // Reduce la foto a máx. 800px en JPEG antes de guardarla: una foto de celular sin comprimir
+  // (varios MB en base64) hacía fallar o agotar el tiempo del guardado en Supabase.
+  const handleImg=e=>{
+    const file=e.target.files[0]; if(!file)return;
+    const reader=new FileReader();
+    reader.onload=event=>{
+      const original=event.target.result;
+      const img=new Image();
+      img.onload=()=>{
+        const MAX=800;
+        const scale=Math.min(1, MAX/Math.max(img.width, img.height));
+        const canvas=document.createElement("canvas");
+        canvas.width=Math.round(img.width*scale); canvas.height=Math.round(img.height*scale);
+        const ctx=canvas.getContext("2d");
+        ctx.fillStyle="#ffffff"; ctx.fillRect(0,0,canvas.width,canvas.height);
+        ctx.drawImage(img,0,0,canvas.width,canvas.height);
+        setForm(current=>({...current,img:canvas.toDataURL("image/jpeg",0.8)}));
+      };
+      img.onerror=()=>setForm(current=>({...current,img:original}));
+      img.src=original;
+    };
+    reader.readAsDataURL(file);
+  };
   const addCategory = () => {
     const name = categoryName.trim();
     if (!name) {
