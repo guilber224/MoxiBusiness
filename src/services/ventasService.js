@@ -67,7 +67,10 @@ export const ventasService = {
   async updateVenta(id, updates, empresaId) {
     try {
       if (!empresaId) throw new Error("empresaId requerido");
-      const { id: _id, empresa_id: _eid, usuario_id: _uid, ...safeFields } = updates;
+      // Solo columnas de pago. Reenviar la venta completa incluía "deuda", que en la tabla es una
+      // columna GENERADA → Supabase rechazaba todo el UPDATE y ningún cobro se guardaba (error 428C9).
+      const PAYMENT_FIELDS = ["paid", "debt", "payments"];
+      const safeFields = Object.fromEntries(Object.entries(updates).filter(([k]) => PAYMENT_FIELDS.includes(k)));
       const data = await withRetry(async () => {
         const { data, error } = await supabase
           .from("ventas")

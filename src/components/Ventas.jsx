@@ -501,7 +501,7 @@ export function Ventas({ D, save, user, config, logAction, onRefreshDashboard, o
       id: generateId(),
       numero: Date.now(), customerId: form.customerId, customerName: cust.name, customerMarket: cust.market,
       date: new Date(form.date + "T12:00:00").toISOString(),
-      items: valid.map(it => { const product = products.find(p => p.id === it.productId); const sub = n(it.sub ?? it.subtotal); return { ...it, name: product?.name || "", unit: product?.unit || "", image: product?.img || null, sub, subtotal: sub, original_price: it.original_price || it.unitPrice, sale_price: it.unitPrice }; }),
+      items: valid.map(it => { const product = products.find(p => p.id === it.productId); const sub = n(it.sub ?? it.subtotal); return { ...it, name: product?.name || "", unit: product?.unit || "", image: null, sub, subtotal: sub, original_price: it.original_price || it.unitPrice, sale_price: it.unitPrice }; }),
       subtotal: subtotalItems, discount: discountAmt, discountType: form.discountType,
       total, paid: paidN, debt: debtN, notes: form.notes, paymentMethod: form.paymentMethod,
       payments: paidN > 0 ? [{ amount: paidN, method: form.paymentMethod, date: new Date().toISOString() }] : [],
