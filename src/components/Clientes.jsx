@@ -1,10 +1,7 @@
 import { useState } from "react";
-import toast from "react-hot-toast";
-import { clientesService } from "../services/clientesService.js";
-import { isSupabaseUUID } from "../utils/storageScope.js";
 import { fDate } from "../utils/businessLogic.js";
 import { xlsx } from "../utils/xlsxExport.js";
-import { generateId } from "../empresaScope.js";
+import { useAccion } from "../hooks/useAccion.js";
 import { Bs } from "../currency.js";
 import { C, R } from "../theme.jsx";
 import { card, mkBtn, mkBadge, lbl, inp, row } from "../styles.js";
@@ -18,51 +15,29 @@ import { KPI } from "./ui/KPI.jsx";
 // ╔══════════════════════════════════════════════════════════════════════╗
 // ║  CLIENTES                                                           ║
 // ╚══════════════════════════════════════════════════════════════════════╝
-export function Clientes({ D, save, user }) {
-  const { customers, sales } = D;
+export function Clientes({ D, A }) {
+  const { customers } = D;
+  // Las ventas anuladas no cuentan como compras ni como deuda
+  const sales = D.sales.filter(s => !s.anulada);
   const [q,setQ]=useState(""); const [modal,setModal]=useState(null); const [detail,setDetail]=useState(null);
   const [form,setForm]=useState({name:"",phone:"",address:"",market:"",ci:"",notes:""});
   const [confirmDel,setConfirmDel]=useState(null);
   const [err,setErr]=useState("");
+  const [ejecutar, guardando] = useAccion();
 
-  const filtered=customers.filter(c=>`${c.name} ${c.market}`.toLowerCase().includes(q.toLowerCase()));
+  const filtered=customers.filter(c=>`${c.name} ${c.market} ${c.phone} ${c.ci}`.toLowerCase().includes(q.toLowerCase()));
   const openForm=(c=null)=>{ setErr(""); setForm(c?{...c}:{name:"",phone:"",address:"",market:"",ci:"",notes:""}); setModal(c||"new"); };
-  // Optimista + sync:false: el servicio escribe en Supabase una sola vez (syncDiff no repite),
-  // la UI se actualiza al instante y se revierte si Supabase rechaza la operación.
   const doSave = async () => {
-    if (!form.name.trim()) return;
+    if (!form.name.trim()) { setErr("El nombre es obligatorio"); return; }
     setErr("");
-    const needsRollback = res => res?._localOnly && isSupabaseUUID(user?.empresa_id);
-    if (modal === "new") {
-      const cliente = { ...form, id: generateId(), createdAt: new Date().toISOString() };
-      save("customers", cur => [...(cur || []), cliente], { sync: false });
-      setModal(null);
-      const saved = await clientesService.createCliente(cliente, user?.empresa_id);
-      if (needsRollback(saved)) {
-        save("customers", cur => (cur || []).filter(c => c.id !== cliente.id), { sync: false });
-        toast.error(`No se pudo guardar el cliente "${cliente.name}". Revisa tu conexión e intenta de nuevo.`);
-      }
-    } else {
-      const previous = customers.find(c => c.id === modal.id);
-      const updated = { ...previous, ...form };
-      save("customers", cur => (cur || []).map(c => c.id === updated.id ? { ...c, ...form } : c), { sync: false });
-      setModal(null);
-      const saved = await clientesService.updateCliente(updated, user?.empresa_id).catch(e => { console.error("[Clientes] update:", e.message); return { _localOnly: true }; });
-      if (needsRollback(saved)) {
-        save("customers", cur => (cur || []).map(c => c.id === updated.id ? previous : c), { sync: false });
-        toast.error("No se pudo actualizar el cliente. Se restauró — revisa tu conexión e intenta de nuevo.");
-      }
-    }
+    const ok = modal === "new"
+      ? await ejecutar(() => A.crearCliente(form), { exito: "Cliente registrado" })
+      : await ejecutar(() => A.actualizarCliente(modal.id, form), { exito: "Cliente actualizado" });
+    if (ok) setModal(null);
   };
   const doDelete = async (id) => {
-    const target = customers.find(c => c.id === id);
-    save("customers", cur => (cur || []).filter(c => c.id !== id), { sync: false });
-    setConfirmDel(null); setDetail(null);
-    const res = await clientesService.deleteCliente(id, user?.empresa_id).catch(e => { console.error("[Clientes] delete:", e.message); return { ok: false, error: e.message }; });
-    if (res?.ok === false) {
-      if (target) save("customers", cur => (cur || []).some(c => c.id === id) ? cur : [...(cur || []), target], { sync: false });
-      toast.error("⚠ No se pudo eliminar en Supabase. Se restauró — revisa tu conexión e intenta de nuevo.");
-    }
+    const ok = await ejecutar(() => A.eliminarCliente(id), { exito: "Cliente eliminado" });
+    if (ok) { setConfirmDel(null); setDetail(null); }
   };
 
   const exportXLS=async()=>{
@@ -93,8 +68,8 @@ export function Clientes({ D, save, user }) {
             </div>
           </div>
           {confirmDel===c.id&&<div style={{background:C.redBg,border:`1px solid ${C.redMid}`,borderRadius:R.md,padding:"10px 14px",display:"flex",gap:10,alignItems:"center",marginBottom:12}}>
-            <span style={{fontSize:13,color:C.red,flex:1}}>¿Eliminar a <strong>{c.name}</strong>? Esta acción no se puede deshacer.</span>
-            <button onClick={()=>doDelete(c.id)} style={mkBtn("danger")}>Confirmar</button>
+            <span style={{fontSize:13,color:C.red,flex:1}}>¿Eliminar a <strong>{c.name}</strong>? Su historial de ventas se conserva.</span>
+            <button onClick={()=>doDelete(c.id)} disabled={guardando} style={mkBtn("danger")}>{guardando?"Eliminando…":"Confirmar"}</button>
             <button onClick={()=>setConfirmDel(null)} style={mkBtn("ghost")}>Cancelar</button>
           </div>}
           <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:12}}>
@@ -131,7 +106,7 @@ export function Clientes({ D, save, user }) {
         <button onClick={()=>openForm()} style={mkBtn("primary")}>+ Nuevo cliente</button>
       </>}/>
       <div style={{display:"flex",gap:8,marginBottom:14}}>
-        <SearchInput value={q} onChange={setQ} placeholder="Buscar por nombre o mercado..."/>
+        <SearchInput value={q} onChange={setQ} placeholder="Buscar por nombre, mercado, teléfono o CI..."/>
       </div>
       {filtered.length===0?<Empty icon="👥" title="Sin clientes" sub={q?"Sin resultados":"Agrega tu primer cliente"} action={!q&&<button onClick={()=>openForm()} style={mkBtn("primary")}>+ Agregar cliente</button>}/>:
         filtered.map(c=>{
@@ -164,7 +139,7 @@ export function Clientes({ D, save, user }) {
         {err&&<div style={{color:"#F87171",fontSize:13,marginBottom:10}}>{err}</div>}
         <div style={{display:"flex",gap:8,justifyContent:"flex-end"}}>
           <button onClick={()=>setModal(null)} style={mkBtn("ghost")}>Cancelar</button>
-          <button onClick={doSave} style={mkBtn("primary")}>Guardar cliente</button>
+          <button onClick={doSave} disabled={guardando} style={{...mkBtn("primary"),opacity:guardando?0.6:1}}>{guardando?"Guardando…":"Guardar cliente"}</button>
         </div>
       </Modal>}
     </div>

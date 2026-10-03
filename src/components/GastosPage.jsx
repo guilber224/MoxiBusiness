@@ -1,11 +1,8 @@
 import { useState } from "react";
-import toast from "react-hot-toast";
 import { Search, TrendingDown } from "lucide-react";
-import { gastosService } from "../services/gastosService.js";
-import { isSupabaseUUID } from "../utils/storageScope.js";
 import { n, today, fDate, isAdmin } from "../utils/businessLogic.js";
 import { Bs } from "../currency.js";
-import { generateId } from "../empresaScope.js";
+import { useAccion } from "../hooks/useAccion.js";
 import { C, R } from "../theme.jsx";
 import { card, inp, mkBtn, mkBadge } from "../styles.js";
 import { useIsMobile } from "../hooks/useIsMobile.js";
@@ -14,8 +11,10 @@ import { Modal } from "./ui/Modal.jsx";
 
 const GASTO_CATS = ["Servicios", "Alquiler", "Sueldos", "Transporte", "Insumos", "Marketing", "Impuestos", "Mantenimiento", "Otros"];
 
-export function GastosPage({ D, save, user, logAction, onRefreshDashboard }) {
+export function GastosPage({ D, A, user }) {
   const { expenses } = D;
+  const [ejecutar, guardando] = useAccion();
+  const [err, setErr] = useState("");
   const isMobile = useIsMobile();
   const [modal, setModal] = useState(false);
   const [q, setQ] = useState("");
@@ -37,37 +36,18 @@ export function GastosPage({ D, save, user, logAction, onRefreshDashboard }) {
   }).reduce((s, g) => s + n(g.amount), 0);
 
   const doSave = async () => {
-    if (!form.description.trim() || !form.amount || n(form.amount) <= 0) return;
-    const gasto = {
-      id: generateId(), description: form.description.trim(), amount: n(form.amount),
-      category: form.category, date: new Date(form.date + "T12:00:00").toISOString(),
-      notes: form.notes, type: "gasto", createdAt: new Date().toISOString(), empresa_id: user.empresa_id, usuario_id: user.id
-    };
-    // Optimista: se muestra al instante y se sincroniza en segundo plano; si Supabase lo rechaza, se revierte.
-    save("expenses", cur => [gasto, ...(cur || [])]);
-    logAction?.(`${user.name} registró gasto: ${form.description} ${Bs(n(form.amount))}`);
-    setModal(false); setForm(FORM_RESET());
-    onRefreshDashboard?.();
-    const saved = await gastosService.createGasto(gasto, user.empresa_id).catch(e => ({ _localOnly: true, error: e.message }));
-    if (saved?._localOnly && isSupabaseUUID(user?.empresa_id)) {
-      save("expenses", cur => (cur || []).filter(e => e.id !== gasto.id));
-      toast.error(`No se pudo guardar el gasto "${gasto.description}". Revisa tu conexión e intenta de nuevo.`);
-    }
+    if (!form.description.trim()) { setErr("Escribe una descripción"); return; }
+    if (n(form.amount) <= 0) { setErr("El monto debe ser mayor a 0"); return; }
+    setErr("");
+    const ok = await ejecutar(() => A.registrarGasto({ type: "gasto", description: form.description.trim(), amount: n(form.amount), category: form.category, date: form.date, notes: form.notes }),
+      { exito: "Gasto registrado" });
+    if (ok) { setModal(false); setForm(FORM_RESET()); }
   };
 
   const doDelete = async () => {
     if (!deleteTarget) return;
-    const target = deleteTarget;
-    save("expenses", cur => (cur || []).filter(e => e.id !== target.id));
-    setDeleteTarget(null);
-    onRefreshDashboard?.();
-    const res = await gastosService.deleteGasto(target.id, user.empresa_id).catch(e => ({ ok: false, error: e.message }));
-    if (res?.ok === false) {
-      save("expenses", cur => (cur || []).some(e => e.id === target.id) ? cur : [target, ...(cur || [])]);
-      toast.error("No se pudo eliminar el gasto. Se restauró — revisa tu conexión e intenta de nuevo.");
-      return;
-    }
-    logAction?.(`${user.name} eliminó gasto: ${target.description}`);
+    const ok = await ejecutar(() => A.eliminarGasto(deleteTarget.id), { exito: "Gasto eliminado" });
+    if (ok) setDeleteTarget(null);
   };
 
   return (
@@ -119,7 +99,7 @@ export function GastosPage({ D, save, user, logAction, onRefreshDashboard }) {
                 </div>
               </div>
               <div style={{ fontWeight: 800, fontSize: 15, color: C.red, flexShrink: 0 }}>{Bs(n(g.amount))}</div>
-              {isAdmin(user) && <button onClick={() => setDeleteTarget(g)} style={{ ...mkBtn("ghost"), padding: "4px 8px", fontSize: 11, flexShrink: 0, color: C.red }}>×</button>}
+              {(isAdmin(user) || user?.role === "superadmin") && <button onClick={() => setDeleteTarget(g)} style={{ ...mkBtn("ghost"), padding: "4px 8px", fontSize: 11, flexShrink: 0, color: C.red }}>×</button>}
             </div>
           ))}
         </div>
@@ -152,9 +132,10 @@ export function GastosPage({ D, save, user, logAction, onRefreshDashboard }) {
               <label style={{ fontSize: 12, color: C.textMid, display: "block", marginBottom: 4 }}>Notas</label>
               <input value={form.notes} onChange={e => setForm(f => ({ ...f, notes: e.target.value }))} placeholder="Descripción adicional (opcional)" style={{ ...inp, margin: 0 }} />
             </div>
+            {err && <div style={{ color: C.red, fontSize: 13 }}>{err}</div>}
             <div style={{ display: "flex", gap: 8, justifyContent: "flex-end", marginTop: 6 }}>
               <button onClick={() => setModal(false)} style={mkBtn("ghost")}>Cancelar</button>
-              <button onClick={doSave} disabled={!form.description.trim() || n(form.amount) <= 0} style={{ ...mkBtn("danger"), opacity: (!form.description.trim() || n(form.amount) <= 0) ? 0.5 : 1 }}>Registrar gasto</button>
+              <button onClick={doSave} disabled={guardando || !form.description.trim() || n(form.amount) <= 0} style={{ ...mkBtn("danger"), opacity: (guardando || !form.description.trim() || n(form.amount) <= 0) ? 0.5 : 1 }}>{guardando ? "Guardando…" : "Registrar gasto"}</button>
             </div>
           </div>
         </Modal>
@@ -165,7 +146,7 @@ export function GastosPage({ D, save, user, logAction, onRefreshDashboard }) {
           <div style={{ fontSize: 13, color: C.textMid, marginBottom: 16 }}>¿Eliminar el gasto <strong>{deleteTarget.description}</strong> por <strong>{Bs(n(deleteTarget.amount))}</strong>?</div>
           <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
             <button onClick={() => setDeleteTarget(null)} style={mkBtn("ghost")}>Cancelar</button>
-            <button onClick={doDelete} style={mkBtn("danger")}>Eliminar</button>
+            <button onClick={doDelete} disabled={guardando} style={mkBtn("danger")}>{guardando ? "Eliminando…" : "Eliminar"}</button>
           </div>
         </Modal>
       )}

@@ -1,302 +1,219 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
+import toast from "react-hot-toast";
+import { Upload, ImageIcon } from "lucide-react";
 import { createClient, SUPABASE_URL, SUPABASE_ANON_KEY } from "../lib/supabaseClient";
 import { userService } from "../services/userService.js";
-import { uid, isSupabaseUser, fDate, fDateTime } from "../utils/businessLogic.js";
+import { fDate, fDateTime, isAdmin } from "../utils/businessLogic.js";
 import { CURRENCIES, formatCurrency } from "../currency.js";
 import { C } from "../theme.jsx";
 import { card, mkBtn, mkBadge, inp, lbl, row } from "../styles.js";
+import { useAccion } from "../hooks/useAccion.js";
 import { Header } from "./ui/Header.jsx";
 import { Empty } from "./ui/Empty.jsx";
 import { Modal } from "./ui/Modal.jsx";
 import { Table } from "./ui/Table.jsx";
-import { ROLE_LABELS, ROLE_OPTIONS } from "../navConfig.js";
-import { LogoUploader } from "./LogoUploader.jsx";
-import { QrUploader } from "./QrUploader.jsx";
 
-export function UsuariosAdmin({ D, save, user, logAction, onProfileUpdate }) {
+const ROLES = [
+  { id: "admin", label: "Administrador", desc: "Acceso total, incluida la configuración y el equipo" },
+  { id: "vendedor", label: "Vendedor", desc: "Ventas, clientes, pedidos, deudas, caja y gastos" },
+  { id: "operador", label: "Operador", desc: "Productos, inventario y producción" },
+];
+const ROL_TXT = Object.fromEntries(ROLES.map(r => [r.id, r.label]));
+const FORM_VACIO = { name: "", email: "", password: "", confirm: "", role: "vendedor" };
+
+// Imagen de la empresa (logo o QR de cobro) en Supabase Storage
+function ImagenEmpresa({ titulo, ayuda, url, nombre, campo, A, puedeEditar }) {
+  const [ejecutar, subiendo] = useAccion();
+  const fileRef = useRef(null);
+  const subir = async file => {
+    if (!file) return;
+    if (!file.type.startsWith("image/")) { toast.error("Solo se permiten imágenes"); return; }
+    if (file.size > 8 * 1024 * 1024) { toast.error("La imagen no puede superar 8 MB"); return; }
+    await ejecutar(async () => {
+      const nueva = await A.subirArchivoEmpresa(file, nombre);
+      await A.actualizarConfig({ [campo]: nueva });
+    }, { exito: `${titulo} actualizado` });
+  };
+  return (
+    <div style={{ ...card(), marginBottom: 14 }}>
+      <div style={{ fontWeight: 700, fontSize: 13, marginBottom: 12 }}>{titulo}</div>
+      <div style={{ display: "flex", gap: 16, alignItems: "center", flexWrap: "wrap" }}>
+        <div onClick={() => puedeEditar && !subiendo && fileRef.current?.click()}
+          onDrop={e => { e.preventDefault(); puedeEditar && subir(e.dataTransfer.files[0]); }} onDragOver={e => e.preventDefault()}
+          style={{ width: 96, height: 96, border: "2px dashed var(--color-border)", borderRadius: 14, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", cursor: puedeEditar ? "pointer" : "default", overflow: "hidden", background: "var(--color-bg-primary)", flexShrink: 0 }}>
+          {url ? <img src={url} alt={titulo} style={{ width: "100%", height: "100%", objectFit: "contain" }} />
+            : <><ImageIcon size={24} color="var(--color-text-faint)" /><div style={{ fontSize: 9, color: "var(--color-text-faint)", marginTop: 6 }}>{subiendo ? "Subiendo…" : "Sin imagen"}</div></>}
+        </div>
+        <div style={{ flex: 1, minWidth: 160 }}>
+          <div style={{ fontSize: 12, color: "var(--color-text-mid)", marginBottom: 10 }}>{ayuda}</div>
+          <input ref={fileRef} type="file" accept="image/*" style={{ display: "none" }} onChange={e => { subir(e.target.files[0]); e.target.value = ""; }} />
+          {puedeEditar && <div style={{ display: "flex", gap: 8 }}>
+            <button onClick={() => fileRef.current?.click()} disabled={subiendo} style={{ ...mkBtn("ghost"), fontSize: 12, display: "flex", alignItems: "center", gap: 6 }}><Upload size={13} />{subiendo ? "Subiendo…" : url ? "Cambiar" : "Subir imagen"}</button>
+            {url && <button onClick={() => ejecutar(() => A.actualizarConfig({ [campo]: null }), { exito: `${titulo} quitado` })} disabled={subiendo} style={{ ...mkBtn("danger"), fontSize: 12, padding: "6px 10px" }}>Quitar</button>}
+          </div>}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+export function UsuariosAdmin({ D, A, user, onProfileUpdate }) {
   const { users, config, activityLogs } = D;
+  const admin = isAdmin(user) || user?.role === "superadmin";
+  const [ejecutar, guardando] = useAccion();
   const [modal, setModal] = useState(false);
-  const [deleteTarget, setDeleteTarget] = useState(null);
+  const [form, setForm] = useState(FORM_VACIO);
   const [err, setErr] = useState("");
-  const [isSaving, setIsSaving] = useState(false);
-  const [form, setForm] = useState({ name: "", email: "", username: "", password: "", confirm: "", role: "usuario" });
-  const isSupabaseMode = isSupabaseUser(user);
-  const [businessName, setBusinessName] = useState(config?.businessName || "");
-  const [currencyCode, setCurrencyCode] = useState(config?.currency || "BOB");
+  const [empresa, setEmpresa] = useState(config);
   const [displayName, setDisplayName] = useState(user?.name || "");
-  const [profileSaved, setProfileSaved] = useState(false);
-  const adminCount = users.filter(user => user.role === "admin").length;
+  useEffect(() => { setEmpresa(config); }, [config]);
 
-  useEffect(() => { setCurrencyCode(config?.currency || "BOB"); }, [config?.currency]);
-
-  const resetForm = () => {
-    setForm({ name: "", email: "", username: "", password: "", confirm: "", role: "usuario" });
-    setErr("");
-  };
-
-  useEffect(() => {
-    setBusinessName(config?.businessName || "");
-  }, [config?.businessName]);
-
-  const openModal = () => {
-    resetForm();
-    setModal(true);
-  };
-
-  const saveUser = async () => {
-    const name = form.name.trim();
-    setErr("");
-
-    // ── Modo Supabase: crear usuario real con email + Supabase Auth ──────────
-    if (isSupabaseMode) {
-      const email = form.email?.trim();
-      if (!name) { setErr("Escribe el nombre completo"); return; }
-      if (!email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) { setErr("Ingresa un email válido"); return; }
-      if (!form.password || form.password.length < 6) { setErr("La contraseña debe tener al menos 6 caracteres"); return; }
-      if (form.password !== form.confirm) { setErr("Las contraseñas no coinciden"); return; }
-      setIsSaving(true);
-      try {
-        // Paso 1: crear usuario en Supabase Auth (cliente temporal, no afecta sesión del admin)
-        const tempClient = createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
-          auth: { storageKey: "moxi_temp_signup", persistSession: false },
-        });
-        let newId;
-        const { data: authData, error: signupErr } = await tempClient.auth.signUp({
-          email, password: form.password,
-          options: { data: { nombre: name } },
-        });
-        if (signupErr) {
-          const isAlreadyRegistered = signupErr.status === 422 || signupErr.message?.toLowerCase().includes("already registered");
-          if (isAlreadyRegistered) {
-            // Auth user ya existe — intentar signIn con la contraseña proporcionada para obtener su UUID
-            const { data: signInData, error: signInErr } = await tempClient.auth.signInWithPassword({ email, password: form.password });
-            if (signInErr) throw new Error("Ese email ya tiene cuenta Supabase. Usa otro email, o pide al trabajador que inicie sesión directamente.");
-            newId = signInData.user?.id;
-          } else {
-            throw signupErr;
-          }
-        } else {
-          newId = authData.user?.id;
-        }
-        if (!newId) throw new Error("No se pudo obtener el ID del usuario de Supabase");
-
-        // Paso 2: crear perfil via RPC SECURITY DEFINER (bypasea RLS de INSERT)
-        const profile = await userService.createWorkerProfile({
-          id: newId, email, nombre: name, role: form.role, empresa_id: user.empresa_id,
-        });
-        if (!profile) throw new Error("Auth creado pero perfil falló — ejecuta el SQL de create_worker_profile en Supabase");
-
-        // Paso 3: actualizar lista local para que el admin vea al nuevo usuario de inmediato
-        save("users", [...users, { id: newId, name, email, role: form.role, empresa_id: user.empresa_id }]);
-        setModal(false);
-        resetForm();
-        logAction?.(`${user.name} creó cuenta para ${name} (${email}) — rol ${ROLE_LABELS[form.role]?.toLowerCase()}`);
-      } catch (e) {
-        console.warn("[UsuariosAdmin] saveUser error:", e.message);
-        setErr(e.message || "Error al crear usuario, inténtalo de nuevo");
-      } finally {
-        setIsSaving(false);
-      }
-      return;
-    }
-
-    // ── Modo local: sistema de usuarios por username+password ────────────────
-    const username = form.username.trim();
-    if (!name || !username || !form.password) { setErr("Completa todos los campos del usuario"); return; }
-    if (form.password.length < 4) { setErr("La contraseña debe tener al menos 4 caracteres"); return; }
-    if (form.password !== form.confirm) { setErr("Las contraseñas no coinciden"); return; }
-    if (users.some(u => u.username?.toLowerCase() === username.toLowerCase())) { setErr("Ese usuario ya existe"); return; }
-    save("users", [
-      ...users,
-      { id: "u" + uid(), name, username, password: form.password, role: form.role, createdAt: new Date().toISOString() },
-    ]);
-    logAction?.(`${user.name} creó la cuenta de ${name} con rol ${ROLE_LABELS[form.role]?.toLowerCase()}`);
-    setModal(false);
-    resetForm();
-  };
-
-  const removeUser = () => {
-    if (!deleteTarget) return;
-    if (deleteTarget.id === user.id) {
-      setErr("No puedes eliminar tu propia cuenta mientras está iniciada");
-      setDeleteTarget(null);
-      return;
-    }
-    if (deleteTarget.role === "admin" && adminCount <= 1) {
-      setErr("Debe existir al menos un administrador");
-      setDeleteTarget(null);
-      return;
-    }
-    save("users", users.filter(user => user.id !== deleteTarget.id));
-    logAction?.(`${user.name} eliminó la cuenta de ${deleteTarget.name}`);
-    setDeleteTarget(null);
-  };
-
-  const saveBusinessConfig = () => {
-    const nextName = businessName.trim();
-    if (!nextName) { setErr("El nombre del negocio no puede quedar vacío"); return; }
-    save("config", {
-      ...config,
-      businessName: nextName,
-      currency: currencyCode,
-      createdAt: config?.createdAt || new Date().toISOString(),
-      updatedAt: new Date().toISOString(),
-    });
-    logAction?.(`${user.name} actualizó la configuración del negocio`);
-    setErr("");
+  const recargarEquipo = async () => {
+    const lista = await userService.getEmpresaUsuarios(user.empresa_id);
+    A.setUsuarios(lista.map(u => ({ ...u, role: String(u.role || "").toLowerCase() })));
   };
 
   const saveDisplayName = async () => {
     const next = displayName.trim();
     if (!next) return;
-    await userService.updateProfileName(user.id, next).catch(() => {});
-    onProfileUpdate?.(next);
-    logAction?.(`${user.name} actualizó su nombre de perfil a ${next}`);
-    setProfileSaved(true);
-    setTimeout(() => setProfileSaved(false), 3000);
+    const ok = await ejecutar(async () => { const r = await userService.updateProfileName(user.id, next); if (!r) throw new Error("No se pudo guardar tu nombre"); }, { exito: "Nombre actualizado" });
+    if (ok) onProfileUpdate?.(next);
   };
+
+  const saveEmpresa = async () => {
+    if (!empresa.businessName?.trim()) { toast.error("El nombre del negocio no puede quedar vacío"); return; }
+    await ejecutar(() => A.actualizarConfig(empresa), { exito: "Datos de la empresa guardados" });
+  };
+
+  const crearUsuario = async () => {
+    const name = form.name.trim(); const email = form.email.trim().toLowerCase();
+    if (!name) { setErr("Escribe el nombre completo"); return; }
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) { setErr("Ingresa un email válido"); return; }
+    if (form.password.length < 8) { setErr("La contraseña debe tener al menos 8 caracteres"); return; }
+    if (form.password !== form.confirm) { setErr("Las contraseñas no coinciden"); return; }
+    setErr("");
+    const ok = await ejecutar(async () => {
+      // Cuenta en Supabase Auth con un cliente temporal (no cierra la sesión del administrador)
+      const temp = createClient(SUPABASE_URL, SUPABASE_ANON_KEY, { auth: { storageKey: "moxi_temp_signup", persistSession: false } });
+      let newId;
+      const { data, error } = await temp.auth.signUp({ email, password: form.password, options: { data: { nombre: name } } });
+      if (error) {
+        if (error.status === 422 || /already registered/i.test(error.message)) {
+          const { data: si, error: e2 } = await temp.auth.signInWithPassword({ email, password: form.password });
+          if (e2) throw new Error("Ese email ya tiene una cuenta. Usa otro email o pide a la persona que te dé su contraseña actual.");
+          newId = si.user?.id;
+        } else throw new Error(error.message);
+      } else newId = data.user?.id;
+      if (!newId) throw new Error("No se pudo crear la cuenta");
+      const perfil = await userService.createWorkerProfile({ id: newId, email, nombre: name, role: form.role });
+      if (!perfil) throw new Error(userService._lastError || "La cuenta se creó, pero no se pudo asignar a tu empresa");
+      await recargarEquipo();
+      A.log(`${user.name} creó la cuenta de ${name} (${email}) como ${ROL_TXT[form.role]}`);
+    }, { exito: `Usuario ${name} creado` });
+    if (ok) { setModal(false); setForm(FORM_VACIO); }
+  };
+
+  const cambiarRol = (u, role) => ejecutar(async () => {
+    await userService.cambiarRol(u.id, role);
+    await recargarEquipo();
+    A.log(`${user.name} cambió el rol de ${u.name} a ${ROL_TXT[role]}`);
+  }, { exito: "Rol actualizado" });
+
+  const cambiarActivo = u => ejecutar(async () => {
+    await userService.setActivo(u.id, !u.active);
+    await recargarEquipo();
+    A.log(`${user.name} ${u.active ? "desactivó" : "reactivó"} la cuenta de ${u.name}`);
+  }, { exito: u.active ? "Usuario desactivado" : "Usuario reactivado" });
+
+  const equipo = users.map(u => ({ ...u, active: u.active ?? u.activo ?? true }));
 
   return (
     <div>
-      <Header
-        title="Ajustes"
-        sub="Configuración de empresa, usuarios y preferencias del sistema"
-        action={<button onClick={openModal} style={mkBtn("primary")}>+ Nuevo usuario</button>}
-      />
-      {err && <div style={{ ...card({ marginBottom: 12, borderLeft: `3px solid ${C.red}` }), color: C.red }}>{err}</div>}
-      {/* Mi Perfil */}
+      <Header title="Ajustes" sub="Tu perfil, la empresa y el equipo" action={admin && <button onClick={() => { setErr(""); setForm(FORM_VACIO); setModal(true); }} style={mkBtn("primary")}>+ Nuevo usuario</button>} />
+
       <div style={{ ...card(), marginBottom: 14 }}>
         <div style={{ fontWeight: 700, fontSize: 13, marginBottom: 12 }}>Mi perfil</div>
         <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
-          <input style={{ ...inp, flex: "1 1 220px" }} value={displayName} onChange={e => setDisplayName(e.target.value)} placeholder="Nombre de display" />
-          <button onClick={saveDisplayName} style={mkBtn("primary")}>Guardar nombre</button>
-          {profileSaved && <span style={{ fontSize: 12, color: C.green, fontWeight: 600 }}>✓ Guardado</span>}
+          <input style={{ ...inp, flex: "1 1 220px", margin: 0 }} value={displayName} onChange={e => setDisplayName(e.target.value)} placeholder="Tu nombre" aria-label="Tu nombre" />
+          <button onClick={saveDisplayName} disabled={guardando} style={mkBtn("primary")}>Guardar nombre</button>
         </div>
-        <div style={{ fontSize: 12, color: C.textFaint, marginTop: 8 }}>
-          Este nombre se mostrará en el sidebar, comprobantes y registros de actividad. ID: <code style={{ fontSize: 11 }}>{user?.id}</code>
-        </div>
+        <div style={{ fontSize: 12, color: C.textFaint, marginTop: 8 }}>Aparece en el menú, los comprobantes y el registro de actividad. Rol: <strong>{ROL_TXT[user.role] || user.role}</strong></div>
       </div>
+
       <div style={{ ...card(), marginBottom: 14 }}>
-        <div style={{ fontWeight: 700, fontSize: 13, marginBottom: 12 }}>Configuración del negocio</div>
-        <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 10 }}>
-          <input style={{ ...inp, flex: "1 1 200px", margin: 0 }} value={businessName} onChange={e => setBusinessName(e.target.value)} placeholder="Nombre del negocio" />
-          <select style={{ ...inp, margin: 0, flex: "0 0 auto" }} value={currencyCode} onChange={e => setCurrencyCode(e.target.value)}>
-            {CURRENCIES.map(c => <option key={c.code} value={c.code}>{c.symbol} — {c.name}</option>)}
-          </select>
-          <button onClick={saveBusinessConfig} style={mkBtn("primary")}>Guardar</button>
+        <div style={{ fontWeight: 700, fontSize: 13, marginBottom: 12 }}>Datos de la empresa</div>
+        <div style={row()}>
+          <div style={{ flex: 2 }}><label style={lbl}>Nombre del negocio *</label><input style={inp} disabled={!admin} value={empresa.businessName || ""} onChange={e => setEmpresa({ ...empresa, businessName: e.target.value })} /></div>
+          <div style={{ flex: 1 }}><label style={lbl}>NIT</label><input style={inp} disabled={!admin} value={empresa.nit || ""} onChange={e => setEmpresa({ ...empresa, nit: e.target.value })} /></div>
         </div>
-        <div style={{ fontSize: 12, color: C.textFaint }}>
-          Moneda activa: <strong style={{ color: C.text }}>{formatCurrency(1234.5)}</strong> · Aplica en ventas, POS, reportes, PDF y comprobantes.
+        <div style={row()}>
+          <div style={{ flex: 1 }}><label style={lbl}>Teléfono / WhatsApp</label><input style={inp} disabled={!admin} value={empresa.telefono || ""} onChange={e => setEmpresa({ ...empresa, telefono: e.target.value })} /></div>
+          <div style={{ flex: 2 }}><label style={lbl}>Dirección</label><input style={inp} disabled={!admin} value={empresa.direccion || ""} onChange={e => setEmpresa({ ...empresa, direccion: e.target.value })} /></div>
         </div>
+        <div style={row()}>
+          <div style={{ flex: 1 }}><label style={lbl}>Email</label><input type="email" style={inp} disabled={!admin} value={empresa.email || ""} onChange={e => setEmpresa({ ...empresa, email: e.target.value })} /></div>
+          <div style={{ flex: 1 }}><label style={lbl}>Rubro</label><input style={inp} disabled={!admin} value={empresa.rubro || ""} onChange={e => setEmpresa({ ...empresa, rubro: e.target.value })} placeholder="Ej: Abarrotes, alimentos…" /></div>
+          <div style={{ flex: 1 }}><label style={lbl}>Moneda</label>
+            <select style={inp} disabled={!admin} value={empresa.currency || "BOB"} onChange={e => setEmpresa({ ...empresa, currency: e.target.value })}>
+              {CURRENCIES.map(c => <option key={c.code} value={c.code}>{c.symbol} — {c.name}</option>)}
+            </select>
+          </div>
+        </div>
+        {admin && <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+          <div style={{ fontSize: 12, color: C.textFaint }}>Aparecen en las notas de venta y cotizaciones. Formato de moneda: <strong style={{ color: C.text }}>{formatCurrency(1234.5)}</strong></div>
+          <button onClick={saveEmpresa} disabled={guardando} style={mkBtn("primary")}>{guardando ? "Guardando…" : "Guardar empresa"}</button>
+        </div>}
       </div>
-      <LogoUploader config={config} save={save} user={user} />
-      <QrUploader config={config} save={save} user={user} />
+
+      <ImagenEmpresa titulo="Logo" nombre="logo" campo="logo_url" url={config.logo_url} A={A} puedeEditar={admin} ayuda="Aparece en el menú, las notas de venta y las cotizaciones. JPG, PNG o SVG." />
+      <ImagenEmpresa titulo="QR de cobro" nombre="qr" campo="qr_url" url={config.qr_url} A={A} puedeEditar={admin} ayuda="Se muestra en el punto de venta cuando el cliente paga por QR." />
+
       <div style={card()}>
-        {users.length === 0 ? (
-          <Empty icon="🛡️" title="Sin usuarios" sub="Crea la primera cuenta desde este módulo" />
-        ) : (
-          <Table
-            cols={[
-              { key: "name", label: "Nombre", style: { fontWeight: 600 } },
-              { key: "role", label: "Rol", render: value => <span style={mkBadge(value === "admin" ? "red" : "blue")}>{ROLE_LABELS[value] || value}</span> },
-              { key: "username", label: "Usuario" },
-              { key: "createdAt", label: "Creado", render: value => value ? fDate(value) : "—" },
-              {
-                key: "id",
-                label: "Acciones",
-                render: (_, row) => (
-                  <button
-                    onClick={event => {
-                      event.stopPropagation();
-                      setDeleteTarget(row);
-                      setErr("");
-                    }}
-                    style={{ ...mkBtn("danger"), padding: "6px 10px" }}
-                    disabled={row.id === user.id}
-                  >
-                    Eliminar
-                  </button>
-                ),
-              },
-            ]}
-            rows={users}
-          />
-        )}
-      </div>
-      <div style={{ ...card(), marginTop: 14 }}>
-        <div style={{ fontWeight: 700, fontSize: 13, marginBottom: 12 }}>Log de actividad</div>
-        {(activityLogs || []).length === 0 ? (
-          <Empty icon="🧾" title="Sin actividad registrada" sub="Las acciones relevantes del sistema aparecerán aquí." />
-        ) : (
-          <Table
-            cols={[
-              { key: "userName", label: "Usuario", style: { fontWeight: 600 } },
-              { key: "action", label: "Acción" },
-              { key: "date", label: "Fecha", render: value => fDateTime(value) },
-            ]}
-            rows={(activityLogs || []).slice(0, 50)}
-          />
-        )}
+        <div style={{ fontWeight: 700, fontSize: 13, marginBottom: 12 }}>Equipo</div>
+        {equipo.length === 0 ? <Empty icon="🛡️" title="Sin usuarios" sub="Crea la primera cuenta de tu equipo" /> :
+          <Table cols={[
+            { key: "name", label: "Nombre", style: { fontWeight: 600 }, render: (v, r) => <>{v}{r.id === user.id && <span style={{ ...mkBadge("blue"), marginLeft: 6 }}>Tú</span>}</> },
+            { key: "email", label: "Email", render: v => v || "—" },
+            { key: "role", label: "Rol", render: (v, r) => admin && r.id !== user.id && v !== "superadmin"
+              ? <select aria-label={`Rol de ${r.name}`} value={v} disabled={guardando} onChange={e => cambiarRol(r, e.target.value)} style={{ ...inp, margin: 0, width: "auto", padding: "4px 8px", fontSize: 12 }}>{ROLES.map(x => <option key={x.id} value={x.id}>{x.label}</option>)}</select>
+              : <span style={mkBadge(v === "admin" || v === "superadmin" ? "red" : "blue")}>{ROL_TXT[v] || v}</span> },
+            { key: "active", label: "Estado", render: v => <span style={mkBadge(v ? "green" : "default")}>{v ? "Activo" : "Desactivado"}</span> },
+            { key: "createdAt", label: "Desde", render: v => (v ? fDate(v) : "—") },
+            { key: "id", label: "", render: (_, r) => admin && r.id !== user.id && r.role !== "superadmin"
+              ? <button onClick={() => cambiarActivo(r)} disabled={guardando} style={{ ...mkBtn(r.active ? "danger" : "success"), padding: "5px 10px", fontSize: 12 }}>{r.active ? "Desactivar" : "Reactivar"}</button> : null },
+          ]} rows={equipo} />}
       </div>
 
-      {modal && (
-        <Modal title="Crear usuario" onClose={() => { setModal(false); resetForm(); }}>
-          <div style={row()}>
-            <div style={{ flex: 1 }}>
-              <label style={lbl}>Nombre completo *</label>
-              <input style={inp} value={form.name} onChange={e => setForm({ ...form, name: e.target.value })} placeholder="Nombre del usuario" autoFocus />
-            </div>
-            <div style={{ flex: 1 }}>
-              <label style={lbl}>Rol *</label>
-              <select style={inp} value={form.role} onChange={e => setForm({ ...form, role: e.target.value })}>
-                {ROLE_OPTIONS.map(role => <option key={role.id} value={role.id}>{role.label}</option>)}
-              </select>
-            </div>
-          </div>
-          {isSupabaseMode ? (
-            <div style={{ marginBottom: 10 }}>
-              <label style={lbl}>Email *</label>
-              <input type="email" style={inp} value={form.email} onChange={e => setForm({ ...form, email: e.target.value })} placeholder="email@ejemplo.com" />
-            </div>
-          ) : (
-            <div style={{ marginBottom: 10 }}>
-              <label style={lbl}>Usuario *</label>
-              <input style={inp} value={form.username} onChange={e => setForm({ ...form, username: e.target.value })} placeholder="Usuario de acceso" />
-            </div>
-          )}
-          <div style={row()}>
-            <div style={{ flex: 1 }}>
-              <label style={lbl}>Contraseña *</label>
-              <input type="password" style={inp} value={form.password} onChange={e => setForm({ ...form, password: e.target.value })} placeholder={isSupabaseMode ? "Mínimo 6 caracteres" : "Mínimo 4 caracteres"} />
-            </div>
-            <div style={{ flex: 1 }}>
-              <label style={lbl}>Confirmar *</label>
-              <input type="password" style={inp} value={form.confirm} onChange={e => setForm({ ...form, confirm: e.target.value })} placeholder="Repite la contraseña" />
-            </div>
-          </div>
-          {isSupabaseMode && (
-            <div style={{ fontSize: 11, color: C.textFaint, marginBottom: 10, lineHeight: 1.5 }}>
-              El usuario recibirá un email de confirmación. Una vez confirmado, podrá iniciar sesión con sus credenciales y verá los datos de tu empresa automáticamente.
-            </div>
-          )}
-          <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
-            <button onClick={() => { setModal(false); resetForm(); }} style={mkBtn("ghost")}>Cancelar</button>
-            <button onClick={saveUser} disabled={isSaving} style={{...mkBtn("primary"),opacity:isSaving?0.6:1}}>{isSaving ? "Creando…" : "Guardar usuario"}</button>
-          </div>
-        </Modal>
-      )}
+      {admin && <div style={{ ...card(), marginTop: 14 }}>
+        <div style={{ fontWeight: 700, fontSize: 13, marginBottom: 12 }}>Registro de actividad</div>
+        {(activityLogs || []).length === 0 ? <Empty icon="🧾" title="Sin actividad registrada" sub="Ventas, cobros, anulaciones y cambios importantes aparecerán aquí." /> :
+          <Table cols={[
+            { key: "date", label: "Fecha", render: v => fDateTime(v) },
+            { key: "userName", label: "Usuario", style: { fontWeight: 600 } },
+            { key: "action", label: "Acción" },
+          ]} rows={(activityLogs || []).slice(0, 100)} />}
+      </div>}
 
-      {deleteTarget && (
-        <Modal title="Eliminar usuario" onClose={() => setDeleteTarget(null)} width={420}>
-          <div style={{ fontSize: 13, color: C.textMid, marginBottom: 16 }}>
-            Vas a eliminar a <strong style={{ color: C.text }}>{deleteTarget.name}</strong>. Esta acción quitará su acceso al sistema.
+      {modal && <Modal title="Nuevo usuario" onClose={() => !guardando && setModal(false)}>
+        <div style={row()}>
+          <div style={{ flex: 1 }}><label style={lbl}>Nombre completo *</label><input style={inp} value={form.name} onChange={e => setForm({ ...form, name: e.target.value })} autoFocus /></div>
+          <div style={{ flex: 1 }}><label style={lbl}>Rol *</label>
+            <select style={inp} value={form.role} onChange={e => setForm({ ...form, role: e.target.value })}>{ROLES.map(r => <option key={r.id} value={r.id}>{r.label}</option>)}</select>
           </div>
-          <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
-            <button onClick={() => setDeleteTarget(null)} style={mkBtn("ghost")}>Cancelar</button>
-            <button onClick={removeUser} style={mkBtn("danger")}>Eliminar</button>
-          </div>
-        </Modal>
-      )}
+        </div>
+        <div style={{ fontSize: 11, color: C.textFaint, marginTop: -4, marginBottom: 10 }}>{ROLES.find(r => r.id === form.role)?.desc}</div>
+        <div style={{ marginBottom: 10 }}><label style={lbl}>Email *</label><input type="email" autoComplete="off" style={inp} value={form.email} onChange={e => setForm({ ...form, email: e.target.value })} placeholder="email@ejemplo.com" /></div>
+        <div style={row()}>
+          <div style={{ flex: 1 }}><label style={lbl}>Contraseña *</label><input type="password" autoComplete="new-password" style={inp} value={form.password} onChange={e => setForm({ ...form, password: e.target.value })} placeholder="Mínimo 8 caracteres" /></div>
+          <div style={{ flex: 1 }}><label style={lbl}>Confirmar *</label><input type="password" autoComplete="new-password" style={inp} value={form.confirm} onChange={e => setForm({ ...form, confirm: e.target.value })} /></div>
+        </div>
+        <div style={{ fontSize: 11, color: C.textFaint, marginBottom: 10, lineHeight: 1.5 }}>La persona recibirá un email para confirmar su cuenta. Después podrá entrar con este email y contraseña, y verá solo los datos de tu empresa según su rol.</div>
+        {err && <div style={{ color: C.red, fontSize: 13, marginBottom: 10 }}>{err}</div>}
+        <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
+          <button onClick={() => setModal(false)} disabled={guardando} style={mkBtn("ghost")}>Cancelar</button>
+          <button onClick={crearUsuario} disabled={guardando} style={{ ...mkBtn("primary"), opacity: guardando ? 0.6 : 1 }}>{guardando ? "Creando…" : "Crear usuario"}</button>
+        </div>
+      </Modal>}
     </div>
   );
 }

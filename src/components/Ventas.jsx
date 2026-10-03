@@ -3,12 +3,10 @@ import {
   X, Download, Printer, Camera, Search, ScanLine, MessageCircle,
   Banknote, Building2, QrCode, CreditCard, ChevronLeft, ChevronRight,
 } from "lucide-react";
-import { ventasService } from "../services/ventasService.js";
-import { isSupabaseUUID } from "../utils/storageScope.js";
-import { n, uid, today, fDate, isAdmin, restoreInventoryFromSale } from "../utils/businessLogic.js";
+import { n, uid, today, fDate, fDateTime, isAdmin } from "../utils/businessLogic.js";
 import { formatCurrency, Bs, getCurrencySymbol } from "../currency.js";
-import { generateId } from "../empresaScope.js";
-import { DEFAULT_CATEGORIES, getCategoryName } from "../categories.js";
+import { DEFAULT_CATEGORY_ID, getCategoryName } from "../categories.js";
+import { useAccion } from "../hooks/useAccion.js";
 import { safeBusinessName, C, R, FONT } from "../theme.jsx";
 import { card, lbl, inp, mkBtn, mkBadge } from "../styles.js";
 import { useIsMobile } from "../hooks/useIsMobile.js";
@@ -20,15 +18,18 @@ import { Table } from "./ui/Table.jsx";
 import { SearchInput } from "./ui/SearchInput.jsx";
 import { Chip } from "./ui/Chip.jsx";
 
-const PM_LABELS = { efectivo: "💵 Efectivo", transferencia: "🏦 Transf.", qr: "📱 QR", mixto: "🔀 Mixto" };
-const PM_COLORS = { efectivo: "green", transferencia: "blue", qr: "amber", mixto: "default" };
+const PM_LABELS = { efectivo: "💵 Efectivo", transferencia: "🏦 Transf.", banco: "🏦 Transf.", qr: "📱 QR", tarjeta: "💳 Tarjeta", mixto: "🔀 Mixto", credito: "🧾 Crédito" };
+const PM_COLORS = { efectivo: "green", transferencia: "blue", banco: "blue", qr: "amber", tarjeta: "blue", mixto: "default", credito: "amber" };
+const PM_TEXTO = { efectivo: "Efectivo", transferencia: "Transferencia bancaria", banco: "Transferencia bancaria", qr: "Pago QR", tarjeta: "Tarjeta", mixto: "Pago mixto", credito: "Crédito" };
+// Número visible de la nota de venta (correlativo por empresa)
+const numeroNota = sale => `N° ${String(sale?.numero || 0).padStart(6, "0")}`;
 
 const SALE_BASE_ITEM = () => ({ id: uid(), productId: "", qty: 1, unitPrice: 0, sub: 0, subtotal: 0 });
 
 // ── Receipt helpers ───────────────────────────────────────────────────────────
 const buildReceiptFilename = sale => {
   const stamp = String(sale?.date || new Date().toISOString()).slice(0, 10);
-  return `comprobante_moxi_${stamp}_${sale?.id || uid()}.pdf`;
+  return `nota_venta_${String(sale?.numero || uid()).padStart(6, "0")}_${stamp}.pdf`;
 };
 
 const downloadSaleReceipt = async ({ sale, config, user }) => {
@@ -39,11 +40,11 @@ const downloadSaleReceipt = async ({ sale, config, user }) => {
   const re = W - mr;
   const cw = W - ml - mr;
   const businessName = safeBusinessName(config);
-  const invoiceNum = `#${String(sale.id || "").slice(-8).toUpperCase()}`;
+  const invoiceNum = numeroNota(sale);
   const subtotal = (sale.items || []).reduce((s, i) => s + n(i.sub ?? i.subtotal), 0);
   const discountAmt = n(sale.discount || sale.descuento || 0);
   const total = n(sale.total);
-  const pm = { efectivo: "Efectivo", transferencia: "Transferencia bancaria", qr: "Pago QR", mixto: "Pago mixto" }[sale.paymentMethod] || sale.paymentMethod || "—";
+  const pm = PM_TEXTO[sale.paymentMethod] || sale.paymentMethod || "—";
 
   doc.setFillColor(17, 30, 123);
   doc.rect(0, 0, W, 72, "F");
@@ -52,14 +53,14 @@ const downloadSaleReceipt = async ({ sale, config, user }) => {
   doc.setFont("helvetica", "normal"); doc.setFontSize(8); doc.setTextColor(170, 185, 220);
   doc.text("Sistema ERP · Moxi Business", ml, 42);
   doc.setFont("helvetica", "bold"); doc.setFontSize(20); doc.setTextColor(255, 255, 255);
-  doc.text("FACTURA", re, 28, { align: "right" });
+  doc.text("NOTA DE VENTA", re, 28, { align: "right" });
   doc.setFont("helvetica", "normal"); doc.setFontSize(9); doc.setTextColor(170, 185, 220);
   doc.text(invoiceNum, re, 42, { align: "right" });
 
   doc.setFillColor(249, 250, 251);
   doc.rect(0, 72, W, 52, "F");
   const metaItems = [
-    ["N° DE FACTURA", invoiceNum],
+    ["N° DE NOTA", invoiceNum],
     ["FECHA", fDate(sale.date || sale.createdAt)],
     ["CLIENTE", (sale.customerName || "Público general").slice(0, 28)],
   ];
@@ -157,7 +158,7 @@ const downloadSaleReceipt = async ({ sale, config, user }) => {
   const contact = [config?.direccion, config?.telefono ? `Tel: ${config.telefono}` : null].filter(Boolean).join(" · ");
   if (contact) { doc.setFont("helvetica", "normal"); doc.setFontSize(7); doc.setTextColor(107, 114, 128); doc.text(contact, ml, y + 10); }
   doc.setFont("helvetica", "normal"); doc.setFontSize(7); doc.setTextColor(156, 163, 175);
-  doc.text("Comprobante generado por Moxi Business ERP", re, y, { align: "right" });
+  doc.text("Documento no válido como factura fiscal", re, y, { align: "right" });
   doc.text(`Impreso el ${fDate(new Date())}`, re, y + 10, { align: "right" });
 
   doc.save(buildReceiptFilename(sale));
@@ -211,7 +212,7 @@ function ComprobanteModal({ sale, config, user, products, onClose }) {
   const subtotal = (sale.items || []).reduce((s, i) => s + n(i.sub ?? i.subtotal), 0);
   const descuento = n(sale.discount || sale.descuento || 0);
   const total = n(sale.total);
-  const pmLabel = { efectivo: "💵 Efectivo", transferencia: "🏦 Transferencia bancaria", qr: "📱 Pago QR", mixto: "🔀 Pago mixto" }[sale.paymentMethod] || sale.paymentMethod || "—";
+  const pmLabel = PM_LABELS[sale.paymentMethod] || sale.paymentMethod || "—";
 
   return (
     <div onClick={e => e.target === e.currentTarget && onClose()} style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.62)", zIndex: 260, display: "flex", alignItems: "center", justifyContent: "center", padding: "12px", overflowY: "auto", backdropFilter: "blur(4px)" }}>
@@ -242,20 +243,20 @@ function ComprobanteModal({ sale, config, user, products, onClose }) {
                 </div>
               </div>
               <div style={{ textAlign: "right" }}>
-                <div style={{ fontSize: 28, fontWeight: 800, color: C.brand, letterSpacing: "0.05em" }}>FACTURA</div>
+                <div style={{ fontSize: 24, fontWeight: 800, color: C.brand, letterSpacing: "0.05em" }}>NOTA DE VENTA</div>
               </div>
             </div>
 
             <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 0, padding: "0 28px 20px", borderBottom: "1px solid #E5E7EB" }}>
               {[
-                ["N° de factura", `#${String(sale.id).slice(-8).toUpperCase()}`],
+                ["N° de nota", numeroNota(sale)],
                 ["Fecha", fDate(sale.date || sale.createdAt)],
-                ["Facturar a", sale.customerName || "Público general"],
+                ["Cliente", sale.customerName || "Público general"],
               ].map(([lbl2, val]) => (
                 <div key={lbl2} style={{ paddingRight: 16 }}>
                   <div style={{ fontSize: 10, color: "#9CA3AF", textTransform: "uppercase", letterSpacing: "0.07em", fontWeight: 700, marginBottom: 4 }}>{lbl2}</div>
                   <div style={{ fontSize: 13, fontWeight: 700, color: "#111827" }}>{val}</div>
-                  {lbl2 === "Facturar a" && sale.customerMarket && <div style={{ fontSize: 11, color: "#6B7280", marginTop: 2 }}>{sale.customerMarket}</div>}
+                  {lbl2 === "Cliente" && sale.customerMarket && <div style={{ fontSize: 11, color: "#6B7280", marginTop: 2 }}>{sale.customerMarket}</div>}
                 </div>
               ))}
             </div>
@@ -333,7 +334,7 @@ function ComprobanteModal({ sale, config, user, products, onClose }) {
                 <div style={{ fontWeight: 700, color: "#374151", marginBottom: 2 }}>{businessName}</div>
                 {config?.direccion && <div>{config.direccion}</div>}
                 {config?.telefono && <div>Tel: {config.telefono}</div>}
-                <div style={{ marginTop: 4, fontSize: 10, color: "#9CA3AF" }}>Comprobante generado por Moxi Business ERP</div>
+                <div style={{ marginTop: 4, fontSize: 10, color: "#9CA3AF" }}>Documento no válido como factura fiscal</div>
               </div>
               {sale.notes && (
                 <div style={{ fontSize: 11, color: "#6B7280", fontStyle: "italic", maxWidth: 200, textAlign: "right" }}>{sale.notes}</div>
@@ -428,11 +429,16 @@ function BarcodeScannerButton({ onScan }) {
 // ╔══════════════════════════════════════════════════════════════════════╗
 // ║  VENTAS                                                             ║
 // ╚══════════════════════════════════════════════════════════════════════╝
-export function Ventas({ D, save, user, config, logAction, onRefreshDashboard, onReloadSales, salesLoading, salesError }) {
-  const { sales, customers, products, inventory, categories } = D;
+export function Ventas({ D, A, user, estado }) {
+  const { sales, customers, products } = D;
+  const config = D.config;
+  const [ejecutar, guardando] = useAccion();
+  const [payMethod, setPayMethod] = useState("efectivo");
+  const [motivo, setMotivo] = useState("");
+  const [confirmStock, setConfirmStock] = useState(false);
   const isMobile = useIsMobile();
   const [filter, setFilter] = useState("all"); const [q, setQ] = useState(""); const [modal, setModal] = useState(null); const [detail, setDetail] = useState(null);
-  const [deleteTarget, setDeleteTarget] = useState(null); const [payAmt, setPayAmt] = useState(""); const [err, setErr] = useState(""); const [feedback, setFeedback] = useState(""); const [deleting, setDeleting] = useState(false);
+  const [deleteTarget, setDeleteTarget] = useState(null); const [payAmt, setPayAmt] = useState(""); const [err, setErr] = useState(""); const [feedback, setFeedback] = useState("");
   const [posCategory, setPosCategory] = useState("all"); const [posSearch, setPosSearch] = useState(""); const [barcodeInput, setBarcodeInput] = useState("");
   const [showNewCust, setShowNewCust] = useState(false); const [newCustName, setNewCustName] = useState(""); const [newCustPhone, setNewCustPhone] = useState("");
   const [comprobanteVenta, setComprobanteVenta] = useState(null);
@@ -440,12 +446,12 @@ export function Ventas({ D, save, user, config, logAction, onRefreshDashboard, o
   const barcodeRef = useRef(null);
   const [form, setForm] = useState({ customerId: "__guest__", date: today(), items: [], paid: "", notes: "", paymentMethod: "efectivo", discount: "", discountType: "pct" });
   const FORM_RESET = () => ({ customerId: "__guest__", date: today(), items: [], paid: "", notes: "", paymentMethod: "efectivo", discount: "", discountType: "pct" });
-  const categoryOptions = categories.length ? categories : DEFAULT_CATEGORIES;
+  const categoryOptions = [{ id: DEFAULT_CATEGORY_ID, name: "Sin categoría" }, ...D.categories];
   const posCategories = [["all", "Todos"], ...categoryOptions.map(c => [c.id, c.name])];
-  const canDeleteSales = isAdmin(user);
+  const canDeleteSales = isAdmin(user) || user?.role === "superadmin";
   const GUEST = { id: "__guest__", name: "Público general", market: "", phone: "" };
 
-  const getStock = id => (inventory.find(i => i.productId === id) || {}).stock || 0;
+  const getStock = id => products.find(p => p.id === id)?.stock ?? 0;
   const updateItem = (id, field, val) => setForm(f => ({ ...f, items: f.items.map(it => { if (it.id !== id) return it; const u = { ...it, [field]: val }; if (field === "productId") { const p = products.find(p => p.id === val); if (p) { u.unitPrice = p.price; u.original_price = p.price; } } if (field === "unitPrice" && !u.original_price) u.original_price = it.unitPrice || it.original_price; const sub = n(u.qty) * n(u.unitPrice); return { ...u, sub, subtotal: sub }; }) }));
   const addItem = () => setForm(f => ({ ...f, items: [...f.items, SALE_BASE_ITEM()] }));
   const addProductToCart = productId => setForm(f => {
@@ -464,7 +470,7 @@ export function Ventas({ D, save, user, config, logAction, onRefreshDashboard, o
   const paidN = n(form.paid);
   const debtN = Math.max(0, total - paidN);
 
-  const closeModal = () => { setModal(null); setErr(""); setPosCategory("all"); setPosSearch(""); setBarcodeInput(""); setShowNewCust(false); setNewCustName(""); setNewCustPhone(""); setForm(FORM_RESET()); setPaso(1); };
+  const closeModal = () => { setModal(null); setErr(""); setConfirmStock(false); setPosCategory("all"); setPosSearch(""); setBarcodeInput(""); setShowNewCust(false); setNewCustName(""); setNewCustPhone(""); setForm(FORM_RESET()); setPaso(1); };
 
   const handleBarcode = e => {
     if (e.key !== "Enter" || !barcodeInput.trim()) return;
@@ -474,10 +480,10 @@ export function Ventas({ D, save, user, config, logAction, onRefreshDashboard, o
     else { setErr(`Producto "${barcodeInput.trim()}" no encontrado`); setBarcodeInput(""); }
   };
 
-  const doCreateCustomer = () => {
+  const doCreateCustomer = async () => {
     if (!newCustName.trim()) return;
-    const nc = { id: generateId(), name: newCustName.trim(), phone: newCustPhone.trim(), market: "", createdAt: new Date().toISOString() };
-    save("customers", [nc, ...(D.customers || [])]);
+    const nc = await ejecutar(() => A.crearCliente({ name: newCustName.trim(), phone: newCustPhone.trim() }), { exito: "Cliente registrado" });
+    if (!nc) return;
     setForm(f => ({ ...f, customerId: nc.id }));
     setShowNewCust(false); setNewCustName(""); setNewCustPhone("");
   };
@@ -486,134 +492,83 @@ export function Ventas({ D, save, user, config, logAction, onRefreshDashboard, o
     setErr("");
     const valid = form.items.filter(i => i.productId && n(i.qty) > 0);
     if (!valid.length) { setErr("Agrega al menos un producto"); return; }
+    if (valid.some(i => n(i.unitPrice) < 0)) { setErr("Hay un precio negativo"); return; }
     const cust = form.customerId === "__guest__" ? GUEST : customers.find(c => c.id === form.customerId);
     if (!cust) { setErr("Cliente no encontrado"); return; }
-    const prod_map = {};
-    valid.forEach(it => { prod_map[it.productId] = (prod_map[it.productId] || 0) + n(it.qty); });
-    const lowStockItems = Object.entries(prod_map).filter(([id, qty]) => qty > getStock(id));
-    if (lowStockItems.length > 0 && !window._stockWarningConfirmed) {
-      window._stockWarningConfirmed = true;
-      setErr("⚠️ Stock insuficiente en algunos productos. Pulsa 'Finalizar venta' de nuevo para continuar de todos modos.");
+    if (debtN > 0.005 && form.customerId === "__guest__") { setErr("Para vender a crédito o con pago parcial, selecciona o registra un cliente."); return; }
+    const porProducto = {};
+    valid.forEach(it => { porProducto[it.productId] = (porProducto[it.productId] || 0) + n(it.qty); });
+    const sinStock = Object.entries(porProducto).filter(([id, qty]) => qty > getStock(id));
+    if (sinStock.length > 0 && !confirmStock) {
+      setConfirmStock(true);
+      setErr(`⚠️ Stock insuficiente: ${sinStock.map(([id]) => products.find(p => p.id === id)?.name).join(", ")}. Pulsa "Finalizar venta" otra vez para venderlo igual.`);
       return;
     }
-    window._stockWarningConfirmed = false;
-    const sale = {
-      id: generateId(),
-      numero: Date.now(), customerId: form.customerId, customerName: cust.name, customerMarket: cust.market,
-      date: new Date(form.date + "T12:00:00").toISOString(),
-      items: valid.map(it => { const product = products.find(p => p.id === it.productId); const sub = n(it.sub ?? it.subtotal); return { ...it, name: product?.name || "", unit: product?.unit || "", image: null, sub, subtotal: sub, original_price: it.original_price || it.unitPrice, sale_price: it.unitPrice }; }),
-      subtotal: subtotalItems, discount: discountAmt, discountType: form.discountType,
-      total, paid: paidN, debt: debtN, notes: form.notes, paymentMethod: form.paymentMethod,
-      payments: paidN > 0 ? [{ amount: paidN, method: form.paymentMethod, date: new Date().toISOString() }] : [],
-      createdAt: new Date().toISOString(), empresa_id: user.empresa_id,
-    };
-    // Optimista: la venta y el descuento de stock se ven al instante; Supabase confirma en segundo plano.
-    // El id lo genera el cliente (UUID), así que es el mismo que quedará en Supabase.
-    const prevStock = new Map(inventory.filter(i => prod_map[i.productId]).map(i => [i.productId, i.stock]));
-    save("sales", cur => [sale, ...(cur || [])]);
-    save("inventory", cur => (cur || []).map(i => { const qty = prod_map[i.productId]; return qty ? { ...i, stock: Math.max(0, i.stock - qty) } : i; }));
-    logAction?.(`${user.name} realizó una venta de ${Bs(total)} a ${cust.name}`);
-    setFeedback("✓ Venta registrada"); setTimeout(() => setFeedback(""), 4000);
+    const aplicado = Math.min(paidN, total); // lo recibido por encima del total es vuelto
+    const venta = await ejecutar(() => A.registrarVenta({
+      customerId: form.customerId,
+      customerName: cust.name,
+      date: form.date && form.date !== today() ? new Date(form.date + "T12:00:00").toISOString() : null,
+      items: valid.map(it => { const p = products.find(x => x.id === it.productId); return { productId: it.productId, name: p?.name || it.name || "Producto", unit: p?.unit || "", qty: n(it.qty), unitPrice: n(it.unitPrice) }; }),
+      discount: n(form.discount), discountType: form.discountType === "pct" ? "pct" : "amount",
+      payments: aplicado > 0 ? [{ amount: aplicado, method: form.paymentMethod }] : [],
+      notes: form.notes,
+    }));
+    if (!venta) return;
+    setFeedback(`✓ Venta #${venta.numero} registrada${paidN > total ? ` · Vuelto: ${Bs(paidN - total)}` : ""}`); setTimeout(() => setFeedback(""), 5000);
     closeModal();
-    setComprobanteVenta(sale);
-    onRefreshDashboard?.();
-
-    let nueva;
-    try { nueva = await ventasService.createVenta(sale, user); }
-    catch (e) { console.warn("Venta Supabase error:", e.message); nueva = { _localOnly: true }; }
-    if (nueva?._localOnly && isSupabaseUUID(user?.empresa_id)) {
-      save("sales", cur => (cur || []).filter(s => s.id !== sale.id));
-      save("inventory", cur => (cur || []).map(i => prevStock.has(i.productId) ? { ...i, stock: prevStock.get(i.productId) } : i));
-      setComprobanteVenta(cv => cv?.id === sale.id ? null : cv);
-      setFeedback("");
-      setErr(`⚠ No se pudo guardar la venta a ${cust.name} por ${Bs(total)} en Supabase. Se revirtió el stock — revisa tu conexión y regístrala de nuevo.`);
-    }
+    setComprobanteVenta(venta);
   };
 
   const doPayment = async () => {
-    if (!detail) return; const amt = Math.min(n(payAmt), detail.debt); if (amt <= 0) return;
-    const updated = sales.map(s => s.id === detail.id ? { ...s, paid: s.paid + amt, debt: Math.max(0, s.debt - amt), payments: [...(s.payments || []), { amount: amt, date: new Date().toISOString() }] } : s);
-    const ventaActualizada = updated.find(s => s.id === detail.id);
-    const ventaPrevia = detail;
-    setErr("");
-    // Optimista: el cobro se refleja al instante; si Supabase lo rechaza se revierte.
-    save("sales", cur => (cur || []).map(s => s.id === ventaActualizada.id ? ventaActualizada : s));
-    setDetail(ventaActualizada); setPayAmt("");
-    onRefreshDashboard?.();
-    let result;
-    try { result = await ventasService.updateVenta(ventaActualizada.id, ventaActualizada, user?.empresa_id); }
-    catch (e) { console.warn("Cobro Supabase error:", e.message); result = { _localOnly: true }; }
-    if (result?._localOnly && isSupabaseUUID(user?.empresa_id)) {
-      save("sales", cur => (cur || []).map(s => s.id === ventaPrevia.id ? ventaPrevia : s));
-      setDetail(d => d?.id === ventaPrevia.id ? ventaPrevia : d);
-      setErr("⚠ Error Supabase al registrar el cobro. El pago no se guardó — revisa tu conexión e intenta de nuevo.");
-      return;
-    }
-    logAction?.(`${user.name} registró un cobro de ${Bs(amt)} para la venta ${ventaActualizada.id}`);
+    if (!detail) return;
+    const sale = sales.find(s => s.id === detail.id) || detail;
+    const amt = Math.min(n(payAmt), sale.debt); if (amt <= 0) return;
+    const r = await ejecutar(() => A.cobrarVenta(sale.id, amt, payMethod), { exito: `Cobro de ${Bs(amt)} registrado` });
+    if (r) { setDetail(r); setPayAmt(""); }
   };
 
   const doDeleteSale = async () => {
-    if (!deleteTarget || deleting) return;
-    const target = deleteTarget;
-    const prevSales = sales;
-    const prevInventory = inventory;
-    setDeleting(true); setErr("");
-    save("sales", sales.filter(s => s.id !== target.id));
-    save("inventory", restoreInventoryFromSale(inventory, target));
-    if (detail?.id === target.id) setDetail(null);
-    setDeleteTarget(null);
-    logAction?.(`${user.name} eliminó la venta ${target.id} por ${Bs(target.total)}`);
-    setFeedback("Venta eliminada y stock restaurado."); setTimeout(() => setFeedback(""), 4000);
-    try {
-      const res = await ventasService.deleteVenta(target.id, user?.empresa_id);
-      if (res && res.ok === false) {
-        save("sales", prevSales);
-        save("inventory", prevInventory);
-        setFeedback(""); setErr("⚠ No se pudo eliminar la venta en Supabase. Se restauró. Revisa tu conexión (F12).");
-      } else {
-        onRefreshDashboard?.();
-      }
-    } catch (e) {
-      console.error("[Ventas] doDeleteSale:", e?.message);
-      save("sales", prevSales);
-      save("inventory", prevInventory);
-      setFeedback(""); setErr("⚠ Error al eliminar la venta. Se restauró el estado anterior.");
-    } finally {
-      setDeleting(false);
-    }
+    if (!deleteTarget) return;
+    if (!motivo.trim()) { setErr("Indica el motivo de la anulación"); return; }
+    const r = await ejecutar(() => A.anularVenta(deleteTarget.id, motivo.trim()), { exito: "Venta anulada y stock restaurado" });
+    if (r) { setDeleteTarget(null); setMotivo(""); setErr(""); setDetail(r); }
   };
 
-  const filtered = sales.filter(s => { const mq = `${s.customerName} ${s.customerMarket}`.toLowerCase().includes(q.toLowerCase()); const mf = filter === "all" || (filter === "pending" && s.debt > 0) || (filter === "paid" && s.debt === 0); return mq && mf; }).sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
+  const filtered = sales.filter(s => { const mq = `${s.customerName} ${s.customerMarket} ${s.numero}`.toLowerCase().includes(q.toLowerCase()); const mf = filter === "all" ? !s.anulada : filter === "anuladas" ? s.anulada : !s.anulada && ((filter === "pending" && s.debt > 0) || (filter === "paid" && s.debt === 0)); return mq && mf; }).sort((a, b) => new Date(b.date) - new Date(a.date));
+  const vigentes = sales.filter(s => !s.anulada);
   const posProducts = products.filter(product => (posCategory === "all" || product.cat === posCategory) && `${product.name} ${getCategoryName(categoryOptions, product.cat)}`.toLowerCase().includes(posSearch.toLowerCase()));
 
   const calcSaleProfit = (sale) =>
     (sale.items || []).reduce((acc, item) => {
-      const product = products.find(p => p.id === item.productId);
-      return acc + (n(item.unitPrice) - n(product?.cost || 0)) * n(item.qty);
+      // costo al momento de la venta (si existe); si no, el costo actual del producto
+      const costo = n(item.cost) || n(products.find(p => p.id === item.productId)?.cost);
+      return acc + (n(item.unitPrice) - costo) * n(item.qty);
     }, 0);
   const hasCostData = products.some(p => n(p.cost) > 0);
-  const totalRevenue = sales.reduce((s, v) => s + v.total, 0);
-  const totalProfit = hasCostData ? sales.reduce((s, v) => s + calcSaleProfit(v), 0) : 0;
+  const totalRevenue = vigentes.reduce((s, v) => s + v.total, 0);
+  const totalProfit = hasCostData ? vigentes.reduce((s, v) => s + calcSaleProfit(v) - n(v.discount), 0) : 0;
   const avgMargin = totalRevenue > 0 && hasCostData ? Math.round(totalProfit / totalRevenue * 100) : null;
 
   // ── Detalle de venta ──────────────────────────────────────────────────────
   if (detail) {
     const sale = sales.find(s => s.id === detail.id) || detail;
-    const pmLabel = { efectivo: "Efectivo", transferencia: "Transferencia", qr: "QR", mixto: "Mixto" }[sale.paymentMethod] || "—";
     return (
       <div>
         <button onClick={() => setDetail(null)} style={{ ...mkBtn("ghost"), marginBottom: 16 }}>← Volver</button>
         <div style={card()}>
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 14, flexWrap: "wrap", gap: 10 }}>
             <div>
+              <div style={{ fontSize: 12, color: C.textFaint, fontWeight: 600 }}>Venta {numeroNota(sale)}</div>
               <div style={{ fontSize: 19, fontWeight: 700, letterSpacing: "-0.03em" }}>{sale.customerName}</div>
-              <div style={{ fontSize: 13, color: C.textMid }}>{sale.customerMarket && `${sale.customerMarket} · `}{fDate(sale.date)}</div>
+              <div style={{ fontSize: 13, color: C.textMid }}>{sale.customerMarket && `${sale.customerMarket} · `}{fDateTime(sale.date)}</div>
             </div>
             <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
               {sale.paymentMethod && <span style={mkBadge(PM_COLORS[sale.paymentMethod] || "default")}>{PM_LABELS[sale.paymentMethod] || sale.paymentMethod}</span>}
-              <span style={mkBadge(sale.debt > 0 ? "amber" : "green")}>{sale.debt > 0 ? "Pendiente" : "Saldado"}</span>
+              {sale.anulada ? <span style={mkBadge("red")}>ANULADA</span> : <span style={mkBadge(sale.debt > 0 ? "amber" : "green")}>{sale.debt > 0 ? "Pendiente" : "Saldado"}</span>}
+              <button onClick={() => setComprobanteVenta(sale)} style={mkBtn("ghost")}>Comprobante</button>
               <button onClick={() => downloadSaleReceipt({ sale, config, user })} style={mkBtn("ghost")}>PDF</button>
-              {canDeleteSales && <button onClick={() => setDeleteTarget(sale)} style={mkBtn("danger")}>Eliminar</button>}
+              {canDeleteSales && !sale.anulada && <button onClick={() => { setErr(""); setMotivo(""); setDeleteTarget(sale); }} style={mkBtn("danger")}>Anular</button>}
             </div>
           </div>
           <Table cols={[{ key: "name", label: "Producto" }, { key: "qty", label: "Cant.", render: (v, row) => `${v} ${row.unit}` }, { key: "unitPrice", label: "Precio unit.", render: v => Bs(v) }, { key: "sub", label: "Subtotal", render: v => <strong>{Bs(v)}</strong> }]} rows={sale.items} />
@@ -630,27 +585,33 @@ export function Ventas({ D, save, user, config, logAction, onRefreshDashboard, o
             );
           })()}
           {sale.notes && <div style={{ fontSize: 13, color: C.textMid, marginBottom: 12 }}>Notas: {sale.notes}</div>}
-          {sale.debt > 0 && <div style={{ borderTop: `1px solid ${C.border}`, paddingTop: 14 }}>
+          {!sale.anulada && sale.debt > 0 && <div style={{ borderTop: `1px solid ${C.border}`, paddingTop: 14 }}>
             <div style={{ fontWeight: 700, fontSize: 13, marginBottom: 8 }}>Registrar cobro</div>
             <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-              <input type="number" min="0" step="0.5" style={{ ...inp, width: 140 }} value={payAmt} onChange={e => setPayAmt(e.target.value)} placeholder="Monto en Bs." />
-              <button onClick={doPayment} style={mkBtn("primary")}>Registrar cobro</button>
+              <input type="number" min="0" step="0.01" inputMode="decimal" aria-label="Monto a cobrar" style={{ ...inp, width: 140, margin: 0 }} value={payAmt} onChange={e => setPayAmt(e.target.value)} placeholder="Monto" />
+              <select aria-label="Método de pago" value={payMethod} onChange={e => setPayMethod(e.target.value)} style={{ ...inp, width: "auto", margin: 0 }}>
+                <option value="efectivo">Efectivo</option><option value="qr">QR</option><option value="banco">Transferencia</option><option value="tarjeta">Tarjeta</option>
+              </select>
+              <button onClick={doPayment} disabled={guardando || !(n(payAmt) > 0)} style={mkBtn("primary")}>{guardando ? "Guardando…" : "Registrar cobro"}</button>
               <button onClick={() => setPayAmt(sale.debt.toFixed(2))} style={mkBtn("ghost")}>Cobrar todo ({Bs(sale.debt)})</button>
             </div>
           </div>}
           {(sale.payments || []).length > 0 && <div style={{ marginTop: 12 }}>
             <div style={{ ...lbl, marginBottom: 6 }}>Historial de pagos</div>
             {sale.payments.map((p, i) => <div key={i} style={{ display: "flex", justifyContent: "space-between", fontSize: 13, padding: "5px 0", borderBottom: `1px solid ${C.border}` }}>
-              <span style={{ color: C.textMid }}>{fDate(p.date)}{p.method && ` · ${pmLabel}`}</span><span style={{ color: C.green, fontWeight: 600 }}>{Bs(p.amount)}</span>
+              <span style={{ color: C.textMid }}>{fDateTime(p.date)} · {PM_TEXTO[p.method] || p.method}</span><span style={{ color: C.green, fontWeight: 600 }}>{Bs(p.amount)}</span>
             </div>)}
           </div>}
         </div>
-        {deleteTarget && <Modal title="Eliminar venta" onClose={() => setDeleteTarget(null)} width={420}>
-          <div style={{ fontSize: 13, color: C.textMid, marginBottom: 16 }}>Esta acción eliminará la venta y restaurará el stock al inventario.</div>
+        {comprobanteVenta && <ComprobanteModal sale={comprobanteVenta} config={config} user={user} products={products} onClose={() => setComprobanteVenta(null)} />}
+        {deleteTarget && <Modal title={`Anular venta ${numeroNota(deleteTarget)}`} onClose={() => setDeleteTarget(null)} width={440}>
+          <div style={{ fontSize: 13, color: C.textMid, marginBottom: 12 }}>La venta quedará registrada como <strong>anulada</strong>: se devuelve el stock al inventario y sus cobros dejan de contar en caja. Queda constancia de quién la anuló y por qué.</div>
+          <label style={lbl}>Motivo *</label>
+          <input style={inp} value={motivo} onChange={e => setMotivo(e.target.value)} placeholder="Ej: error al registrar, devolución del cliente…" autoFocus />
           {err && <div style={{ fontSize: 12.5, color: C.red, marginBottom: 12 }}>{err}</div>}
           <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
-            <button onClick={() => setDeleteTarget(null)} disabled={deleting} style={mkBtn("ghost")}>Cancelar</button>
-            <button onClick={doDeleteSale} disabled={deleting} style={{ ...mkBtn("danger"), opacity: deleting ? 0.6 : 1 }}>{deleting ? "Eliminando…" : "Eliminar"}</button>
+            <button onClick={() => setDeleteTarget(null)} disabled={guardando} style={mkBtn("ghost")}>Cancelar</button>
+            <button onClick={doDeleteSale} disabled={guardando} style={{ ...mkBtn("danger"), opacity: guardando ? 0.6 : 1 }}>{guardando ? "Anulando…" : "Anular venta"}</button>
           </div>
         </Modal>}
       </div>
@@ -660,7 +621,7 @@ export function Ventas({ D, save, user, config, logAction, onRefreshDashboard, o
   // ── Lista de ventas ───────────────────────────────────────────────────────
   return (
     <div>
-      <Header title="Ventas" sub={`${sales.length} ventas registradas`} action={<button onClick={() => setModal("new")} style={{ ...mkBtn("primary"), fontSize: 14, padding: "9px 18px" }}>+ Nueva venta</button>} />
+      <Header title="Ventas" sub={`${vigentes.length} venta${vigentes.length !== 1 ? "s" : ""} en los últimos 12 meses`} action={<button onClick={() => setModal("new")} style={{ ...mkBtn("primary"), fontSize: 14, padding: "9px 18px" }}>+ Nueva venta</button>} />
       {feedback && <div style={{ ...card({ marginBottom: 12, borderLeft: `3px solid ${C.green}` }), color: C.green, fontWeight: 600 }}>{feedback}</div>}
       {err && <div style={{ ...card({ marginBottom: 12, borderLeft: `3px solid ${C.red}` }), color: C.red, fontWeight: 600 }}>{err}</div>}
       {avgMargin !== null && (
@@ -681,18 +642,14 @@ export function Ventas({ D, save, user, config, logAction, onRefreshDashboard, o
       )}
       <div style={{ display: "flex", gap: 8, marginBottom: 12, flexWrap: "wrap" }}>
         <SearchInput value={q} onChange={setQ} placeholder="Buscar cliente..." />
-        <Chip value={filter} onChange={setFilter} options={[["all", "Todas"], ["pending", "Pendientes"], ["paid", "Saldadas"]]} />
-        {onReloadSales && <button onClick={onReloadSales} style={{ ...mkBtn("ghost"), fontSize: 12, padding: "7px 12px" }}>↺ Recargar</button>}
+        <Chip value={filter} onChange={setFilter} options={[["all", "Todas"], ["pending", "Pendientes"], ["paid", "Saldadas"], ["anuladas", "Anuladas"]]} />
+        <button onClick={A.recargar} disabled={estado?.cargando} style={{ ...mkBtn("ghost"), fontSize: 12, padding: "7px 12px" }}>{estado?.cargando ? "Actualizando…" : "↺ Actualizar"}</button>
       </div>
-      {salesLoading ? (
-        <div style={{ textAlign: "center", padding: "32px 16px", color: C.textFaint }}>
-          <div style={{ fontSize: 13, fontWeight: 500 }}>Cargando ventas…</div>
-        </div>
-      ) : filtered.length === 0 ? <Empty icon="🛒" title="Sin ventas" sub={sales.length === 0 ? "Registra tu primera venta" : "Sin resultados"} action={<div style={{ display: "flex", gap: 8, flexWrap: "wrap", justifyContent: "center" }}>{onReloadSales && <button onClick={onReloadSales} style={mkBtn("ghost")}>↺ Recargar</button>}<button onClick={() => setModal("new")} style={mkBtn("primary")}>+ Registrar venta</button></div>} /> :
+      {filtered.length === 0 ? <Empty icon="🛒" title={sales.length === 0 ? "Aún no hay ventas" : "Sin resultados"} sub={sales.length === 0 ? "Registra tu primera venta" : "Prueba con otro filtro"} action={<button onClick={() => setModal("new")} style={mkBtn("primary")}>+ Registrar venta</button>} /> :
         filtered.map(s => (
           <div key={s.id || s.numero} onClick={() => setDetail(s)} style={{ ...card(), cursor: "pointer", marginBottom: 8, display: "flex", justifyContent: "space-between", alignItems: "center", gap: 10 }} onMouseEnter={e => e.currentTarget.style.borderColor = C.borderMid} onMouseLeave={e => e.currentTarget.style.borderColor = C.border}>
             <div style={{ minWidth: 0 }}>
-              <div style={{ fontWeight: 600, fontSize: 14 }}>{s.customerName}</div>
+              <div style={{ fontWeight: 600, fontSize: 14, textDecoration: s.anulada ? "line-through" : "none" }}><span style={{ color: C.textFaint, fontWeight: 500, marginRight: 6 }}>#{s.numero}</span>{s.customerName}</div>
               <div style={{ fontSize: 12, color: C.textMid, display: "flex", gap: 6, flexWrap: "wrap" }}>
                 <span>{fDate(s.date)}</span>
                 <span>·</span><span>{s.items.length} producto{s.items.length !== 1 ? "s" : ""}</span>
@@ -702,8 +659,7 @@ export function Ventas({ D, save, user, config, logAction, onRefreshDashboard, o
             <div style={{ textAlign: "right", flexShrink: 0 }}>
               <div style={{ fontSize: 16, fontWeight: 800, color: C.red, letterSpacing: "-0.03em" }}>{Bs(s.total)}</div>
               <div style={{ display: "flex", gap: 6, justifyContent: "flex-end", alignItems: "center", marginTop: 4 }}>
-                {s.debt > 0 ? <span style={mkBadge("amber")}>Debe {Bs(s.debt)}</span> : <span style={mkBadge("green")}>Saldado</span>}
-                {canDeleteSales && <button onClick={ev => { ev.stopPropagation(); setDeleteTarget(s); }} style={{ ...mkBtn("danger"), padding: "4px 8px", fontSize: 11 }}>×</button>}
+                {s.anulada ? <span style={mkBadge("red")}>Anulada</span> : s.debt > 0 ? <span style={mkBadge("amber")}>Debe {Bs(s.debt)}</span> : <span style={mkBadge("green")}>Saldado</span>}
               </div>
             </div>
           </div>
@@ -893,6 +849,10 @@ export function Ventas({ D, save, user, config, logAction, onRefreshDashboard, o
                         <span style={{ fontSize: 12, color: C.amber, fontWeight: 600 }}>Pendiente:</span>
                         <span style={{ fontSize: 14, fontWeight: 800, color: C.amber }}>{Bs(debtN)}</span>
                       </div>}
+                      {paidN > total && total > 0 && <div style={{ display: "flex", justifyContent: "space-between", padding: "6px 10px", background: C.greenBg, borderRadius: R.sm, marginBottom: 8, border: `1px solid ${C.greenMid}` }}>
+                        <span style={{ fontSize: 12, color: C.green, fontWeight: 600 }}>Vuelto:</span>
+                        <span style={{ fontSize: 14, fontWeight: 800, color: C.green }}>{Bs(paidN - total)}</span>
+                      </div>}
                       <input value={form.notes} onChange={e => setForm(f => ({ ...f, notes: e.target.value }))} placeholder="Notas (opcional)…" style={{ ...inp, margin: 0, fontSize: 13 }} />
                     </div>
                   </div>
@@ -916,10 +876,10 @@ export function Ventas({ D, save, user, config, logAction, onRefreshDashboard, o
                       </div>
                     </div>
                     <div style={{ padding: "0 12px 14px" }}>
-                      <button onClick={doSave} style={{ width: "100%", padding: "14px", fontSize: 15, fontWeight: 700, background: total > 0 ? C.red : "#ccc", color: "white", border: "none", borderRadius: R.md, cursor: total > 0 ? "pointer" : "not-allowed", letterSpacing: "-0.01em", transition: "background 0.15s" }}
+                      <button onClick={doSave} disabled={guardando} aria-busy={guardando} style={{ opacity: guardando ? 0.7 : 1, width: "100%", padding: "14px", fontSize: 15, fontWeight: 700, background: total > 0 ? C.red : "#ccc", color: "white", border: "none", borderRadius: R.md, cursor: total > 0 ? "pointer" : "not-allowed", letterSpacing: "-0.01em", transition: "background 0.15s" }}
                         onMouseEnter={e => { if (total > 0) e.currentTarget.style.background = C.redHover; }}
                         onMouseLeave={e => { if (total > 0) e.currentTarget.style.background = C.red; }}>
-                        {total > 0 ? "✓ Finalizar venta" : "Agrega productos al carrito"}
+                        {guardando ? "Registrando…" : total > 0 ? "✓ Finalizar venta" : "Agrega productos al carrito"}
                       </button>
                     </div>
                   </div>
@@ -1099,11 +1059,15 @@ export function Ventas({ D, save, user, config, logAction, onRefreshDashboard, o
                         <span style={{ fontSize: 11, color: C.amber, fontWeight: 500 }}>Pendiente:</span>
                         <span style={{ fontSize: 13, fontWeight: 700, color: C.amber }}>{Bs(debtN)}</span>
                       </div>}
+                      {paidN > total && total > 0 && <div style={{ display: "flex", justifyContent: "space-between", padding: "6px 10px", background: C.greenBg, borderRadius: R.sm, marginBottom: 8, border: `1px solid ${C.greenMid}` }}>
+                        <span style={{ fontSize: 12, color: C.green, fontWeight: 600 }}>Vuelto:</span>
+                        <span style={{ fontSize: 14, fontWeight: 800, color: C.green }}>{Bs(paidN - total)}</span>
+                      </div>}
                       <input value={form.notes} onChange={e => setForm(f => ({ ...f, notes: e.target.value }))} placeholder="Notas (opcional)…" style={{ ...inp, margin: "0 0 8px", fontSize: 12 }} />
-                      <button onClick={doSave} style={{ width: "100%", padding: "13px", fontSize: 14, fontWeight: 700, background: total > 0 ? C.red : "#ccc", color: "white", border: "none", borderRadius: R.md, cursor: total > 0 ? "pointer" : "not-allowed", letterSpacing: "-0.01em", transition: "background 0.15s" }}
+                      <button onClick={doSave} disabled={guardando} aria-busy={guardando} style={{ opacity: guardando ? 0.7 : 1, width: "100%", padding: "13px", fontSize: 14, fontWeight: 700, background: total > 0 ? C.red : "#ccc", color: "white", border: "none", borderRadius: R.md, cursor: total > 0 ? "pointer" : "not-allowed", letterSpacing: "-0.01em", transition: "background 0.15s" }}
                         onMouseEnter={e => { if (total > 0) e.currentTarget.style.background = C.redHover; }}
                         onMouseLeave={e => { if (total > 0) e.currentTarget.style.background = C.red; }}>
-                        {total > 0 ? "✓ Finalizar venta" : "Agrega productos al carrito"}
+                        {guardando ? "Registrando…" : total > 0 ? "✓ Finalizar venta" : "Agrega productos al carrito"}
                       </button>
                     </div>
                   </div>

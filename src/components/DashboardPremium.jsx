@@ -22,7 +22,9 @@ export function DashboardPremium({ D, setTab, user, refreshTrigger = 0 }) {
   const [salesPeriod, setSalesPeriod] = useState("week");
   const isMobile = useIsMobile();
 
-  const { sales = [], customers = [], products = [], inventory = [], expenses = [] } = D || {};
+  const { customers = [], products = [], inventory = [], expenses = [] } = D || {};
+  // Las ventas anuladas no cuentan en ningún indicador
+  const sales = useMemo(() => (D?.sales || []).filter(s => !s.anulada), [D?.sales]);
 
   // Inventario: mapa O(1) para búsquedas rápidas de stock
   const stockMap = useMemo(() => Object.fromEntries(inventory.map(i => [i.productId, i.stock || 0])), [inventory]);

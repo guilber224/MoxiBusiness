@@ -1,5 +1,6 @@
 import { useState } from "react";
-import { n, uid, today, fDate, reverseProductionInventory } from "../utils/businessLogic.js";
+import { n, today, fDate, isAdmin } from "../utils/businessLogic.js";
+import { useAccion } from "../hooks/useAccion.js";
 import { Bs } from "../currency.js";
 import { C, R } from "../theme.jsx";
 import { card, lbl, inp, row, mkBtn, mkBadge } from "../styles.js";
@@ -9,37 +10,32 @@ import { Empty } from "./ui/Empty.jsx";
 import { Modal } from "./ui/Modal.jsx";
 import { Table } from "./ui/Table.jsx";
 
-export function Produccion({ D, save, user, logAction }) {
-  const { products, inventory, formulas, orders } = D;
-  const [tab, setTab] = useState("orders"); const [modal, setModal] = useState(null); const [deleteOrder, setDeleteOrder] = useState(null);
-  const [fForm, setFForm] = useState({ name: "", inputId: "", inputQty: 11.5, inputUnit: "arroba (11.5kg)", outputId: "", outputQty: 5, outputUnit: "kg", laborCost: 0, energyCost: 0, desc: "" });
-  const [oForm, setOForm] = useState({ formulaId: "", batches: 1, date: today(), extraCost: 0, notes: "" });
-  const getStock = id => (inventory.find(i => i.productId === id) || {}).stock || 0;
+const FORMULA_VACIA = { name: "", inputId: "", inputQty: "", inputUnit: "", outputId: "", outputQty: "", outputUnit: "", laborCost: 0, energyCost: 0, desc: "" };
 
-  const saveFormula = () => {
-    if (!fForm.name || !fForm.inputId || !fForm.outputId) return;
-    save("formulas", modal === "new_f" ? [...formulas, { ...fForm, id: "f" + uid() }] : formulas.map(f => f.id === modal.id ? { ...f, ...fForm } : f));
-    setModal(null);
+export function Produccion({ D, A, user }) {
+  const { products, formulas, orders } = D;
+  const [ejecutar, guardando] = useAccion();
+  const [err, setErr] = useState("");
+  const admin = isAdmin(user) || user?.role === "superadmin";
+  const [tab, setTab] = useState("orders"); const [modal, setModal] = useState(null); const [deleteOrder, setDeleteOrder] = useState(null);
+  const [fForm, setFForm] = useState(FORMULA_VACIA);
+  const [oForm, setOForm] = useState({ formulaId: "", batches: 1, date: today(), extraCost: 0, notes: "" });
+  const getStock = id => products.find(p => p.id === id)?.stock ?? 0;
+
+  const saveFormula = async () => {
+    if (!fForm.name.trim() || !fForm.inputId || !fForm.outputId) { setErr("Completa el nombre, el insumo y el producto resultante"); return; }
+    if (n(fForm.inputQty) <= 0 || n(fForm.outputQty) <= 0) { setErr("Las cantidades deben ser mayores a 0"); return; }
+    setErr("");
+    const datos = { ...fForm, inputQty: n(fForm.inputQty), outputQty: n(fForm.outputQty), laborCost: n(fForm.laborCost), energyCost: n(fForm.energyCost) };
+    const ok = await ejecutar(() => (modal === "new_f" ? A.crearFormula(datos) : A.actualizarFormula(modal.id, datos)), { exito: "Fórmula guardada" });
+    if (ok) setModal(null);
   };
 
-  const execOrder = () => {
-    if (!oForm.formulaId || !oForm.batches) return;
-    const formula = formulas.find(f => f.id === oForm.formulaId); if (!formula) return;
-    const batches = n(oForm.batches);
-    const inputUsed = formula.inputQty * batches; const outputProduced = formula.outputQty * batches;
-    const baseCost = (formula.laborCost + formula.energyCost) * batches; const totalCost = baseCost + n(oForm.extraCost);
-    const costPerUnit = outputProduced > 0 ? totalCost / outputProduced : 0;
-    const outProd = products.find(p => p.id === formula.outputId);
-    const revenue = outputProduced * ((outProd?.price || 0)); const margin = revenue > 0 ? ((revenue - totalCost) / revenue * 100) : 0;
-    const newInv = inventory.map(i => {
-      if (i.productId === formula.inputId) return { ...i, stock: Math.max(0, i.stock - inputUsed) };
-      if (i.productId === formula.outputId) return { ...i, stock: i.stock + outputProduced };
-      return i;
-    });
-    save("inventory", newInv);
-    save("orders", [{ id: "or" + uid(), formulaId: oForm.formulaId, formulaName: formula.name, inputId: formula.inputId, outputId: formula.outputId, batches, inputUsed, outputProduced, totalCost, costPerUnit, revenue, margin: Math.round(margin), date: oForm.date, notes: oForm.notes, createdAt: new Date().toISOString() }, ...orders]);
-    logAction?.(`${user.name} registró una orden de producción por ${previewOutput.toFixed(1)} ${previewProd?.unit || "unid."}`);
-    setModal(null); setOForm({ formulaId: "", batches: 1, date: today(), extraCost: 0, notes: "" });
+  const execOrder = async () => {
+    if (!oForm.formulaId || !(n(oForm.batches) > 0)) { setErr("Elige una fórmula y la cantidad de lotes"); return; }
+    setErr("");
+    const ok = await ejecutar(() => A.ejecutarProduccion(oForm.formulaId, n(oForm.batches), n(oForm.extraCost), oForm.date, oForm.notes), { exito: "Producción registrada. Stock actualizado." });
+    if (ok) { setModal(null); setOForm({ formulaId: "", batches: 1, date: today(), extraCost: 0, notes: "" }); }
   };
 
   const previewFormula = oForm.formulaId ? formulas.find(f => f.id === oForm.formulaId) : null;
@@ -51,24 +47,26 @@ export function Produccion({ D, save, user, logAction }) {
   const previewRevenue = previewOutput * (previewProd?.price || 0);
   const previewMargin = previewRevenue > 0 ? Math.round((previewRevenue - previewCost) / previewRevenue * 100) : 0;
 
-  const removeOrder = () => {
+  const removeOrder = async () => {
     if (!deleteOrder) return;
-    save("orders", orders.filter(order => order.id !== deleteOrder.id));
-    save("inventory", reverseProductionInventory(inventory, deleteOrder));
-    logAction?.(`${user.name} eliminó el historial de producción ${deleteOrder.formulaName}`);
-    setDeleteOrder(null);
+    const ok = await ejecutar(() => A.anularProduccion(deleteOrder.id), { exito: "Producción anulada. Stock revertido." });
+    if (ok) setDeleteOrder(null);
+  };
+  const eliminarFormula = async f => {
+    if (!window.confirm(`¿Eliminar la fórmula "${f.name}"? El historial de producción se conserva.`)) return;
+    await ejecutar(() => A.eliminarFormula(f.id), { exito: "Fórmula eliminada" });
   };
 
   return (
     <div>
       <Header title="Producción" sub="Órdenes de producción y fórmulas de transformación" action={<>
-        <button onClick={() => { setFForm({ name: "", inputId: "", inputQty: 11.5, inputUnit: "arroba (11.5kg)", outputId: "", outputQty: 5, outputUnit: "kg", laborCost: 0, energyCost: 0, desc: "" }); setModal("new_f"); }} style={mkBtn("ghost")}>+ Nueva fórmula</button>
+        <button onClick={() => { setFForm(FORMULA_VACIA); setModal("new_f"); }} style={mkBtn("ghost")}>+ Nueva fórmula</button>
         <button onClick={() => setModal("new_o")} style={mkBtn("primary")}>▶️ Nueva orden</button>
       </>} />
       <Chip value={tab} onChange={setTab} options={[["orders", "Órdenes de Producción"], ["formulas", "Fórmulas de Transformación"]]} />
       <div style={{ marginTop: 14 }}>
         {tab === "formulas" && (
-          formulas.length === 0 ? <Empty icon="⚗️" title="Sin fórmulas" sub="Define cómo se transforma el ají (ej: vaina → polvo)" action={<button onClick={() => { setFForm({ name: "", inputId: "", inputQty: 11.5, inputUnit: "arroba (11.5kg)", outputId: "", outputQty: 5, outputUnit: "kg", laborCost: 0, energyCost: 0, desc: "" }); setModal("new_f"); }} style={mkBtn("primary")}>+ Crear fórmula</button>} /> :
+          formulas.length === 0 ? <Empty icon="⚗️" title="Sin fórmulas" sub="Define cómo una materia prima se transforma en un producto (ej: harina → pan)" action={<button onClick={() => { setFForm(FORMULA_VACIA); setModal("new_f"); }} style={mkBtn("primary")}>+ Crear fórmula</button>} /> :
             formulas.map(f => {
               const inP = products.find(p => p.id === f.inputId); const outP = products.find(p => p.id === f.outputId);
               const baseCostPU = f.outputQty > 0 ? (f.laborCost + f.energyCost) / f.outputQty : 0;
@@ -92,7 +90,7 @@ export function Produccion({ D, save, user, logAction }) {
                     </div>
                     <div style={{ display: "flex", gap: 4 }}>
                       <button onClick={() => { setFForm({ ...f }); setModal(f); }} style={{ ...mkBtn("ghost"), padding: "5px 9px" }}>✏️</button>
-                      <button onClick={() => save("formulas", formulas.filter(x => x.id !== f.id))} style={{ ...mkBtn("danger"), padding: "5px 9px" }}>🗑️</button>
+                      {admin && <button onClick={() => eliminarFormula(f)} aria-label="Eliminar fórmula" style={{ ...mkBtn("danger"), padding: "5px 9px" }}>🗑️</button>}
                     </div>
                   </div>
                 </div>
@@ -111,24 +109,24 @@ export function Produccion({ D, save, user, logAction }) {
                 { key: "totalCost", label: "Costo", render: v => Bs(v) },
                 { key: "costPerUnit", label: "Costo/Unid.", render: v => Bs(v) },
                 { key: "margin", label: "Margen", render: v => <span style={mkBadge(v >= 30 ? "green" : v >= 10 ? "amber" : "red")}>{v}%</span> },
-                { key: "id", label: "Acciones", render: (_, row) => <button onClick={event => { event.stopPropagation(); setDeleteOrder(row); }} style={{ ...mkBtn("danger"), padding: "5px 9px" }}>Eliminar</button> },
+                { key: "id", label: "Estado", render: (_, row) => row.anulada ? <span style={mkBadge("red")}>Anulada</span> : admin ? <button onClick={event => { event.stopPropagation(); setDeleteOrder(row); }} style={{ ...mkBtn("danger"), padding: "5px 9px" }}>Anular</button> : <span style={mkBadge("green")}>OK</span> },
               ]} rows={orders} />
             </div>
         )}
       </div>
 
-      {deleteOrder && <Modal title="Eliminar historial de producción" onClose={() => setDeleteOrder(null)} width={420}>
+      {deleteOrder && <Modal title="Anular producción" onClose={() => setDeleteOrder(null)} width={420}>
         <div style={{ fontSize: 13, color: C.textMid, marginBottom: 16 }}>
-          Esta acción revertirá el stock consumido y retirará el stock producido de la orden seleccionada.
+          Se devolverá el insumo consumido y se retirará lo producido. La orden queda en el historial como anulada.
         </div>
         <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
           <button onClick={() => setDeleteOrder(null)} style={mkBtn("ghost")}>Cancelar</button>
-          <button onClick={removeOrder} style={mkBtn("danger")}>Eliminar</button>
+          <button onClick={removeOrder} disabled={guardando} style={mkBtn("danger")}>{guardando ? "Anulando…" : "Anular"}</button>
         </div>
       </Modal>}
 
-      {(modal === "new_f" || (modal && modal.id && modal.id.startsWith("f"))) && <Modal title={typeof modal === "string" ? "Nueva fórmula de producción" : "Editar fórmula"} onClose={() => setModal(null)} width={600}>
-        <div style={{ marginBottom: 10 }}><label style={lbl}>Nombre de la fórmula *</label><input style={inp} value={fForm.name} onChange={e => setFForm({ ...fForm, name: e.target.value })} placeholder="Ej: Arroba de vaina → Polvo Rojo" autoFocus /></div>
+      {(modal === "new_f" || (modal && typeof modal === "object" && formulas.some(x => x.id === modal.id))) && <Modal title={typeof modal === "string" ? "Nueva fórmula de producción" : "Editar fórmula"} onClose={() => setModal(null)} width={600}>
+        <div style={{ marginBottom: 10 }}><label style={lbl}>Nombre de la fórmula *</label><input style={inp} value={fForm.name} onChange={e => setFForm({ ...fForm, name: e.target.value })} placeholder="Ej: Harina → Pan, Vaina → Polvo" autoFocus /></div>
         <div style={{ background: C.bg, borderRadius: R.md, padding: "12px", marginBottom: 10 }}>
           <div style={{ ...lbl, color: C.red, marginBottom: 8 }}>📥 Materia prima (entrada)</div>
           <div style={row()}>
@@ -162,7 +160,7 @@ export function Produccion({ D, save, user, logAction }) {
         <div style={{ marginBottom: 18 }}><label style={lbl}>Descripción</label><input style={inp} value={fForm.desc} onChange={e => setFForm({ ...fForm, desc: e.target.value })} placeholder="Descripción del proceso..." /></div>
         <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
           <button onClick={() => setModal(null)} style={mkBtn("ghost")}>Cancelar</button>
-          <button onClick={saveFormula} style={mkBtn("primary")}>Guardar fórmula</button>
+          {err && <span style={{ color: C.red, fontSize: 13, alignSelf: "center" }}>{err}</span>}<button onClick={saveFormula} disabled={guardando} style={mkBtn("primary")}>{guardando ? "Guardando…" : "Guardar fórmula"}</button>
         </div>
       </Modal>}
 
@@ -188,7 +186,7 @@ export function Produccion({ D, save, user, logAction }) {
             <div style={{ marginBottom: 18 }}><label style={lbl}>Notas</label><input style={inp} value={oForm.notes} onChange={e => setOForm({ ...oForm, notes: e.target.value })} placeholder="Observaciones del proceso..." /></div>
             <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
               <button onClick={() => setModal(null)} style={mkBtn("ghost")}>Cancelar</button>
-              <button onClick={execOrder} style={mkBtn("primary")}>▶️ Ejecutar orden</button>
+              {err && <span style={{ color: C.red, fontSize: 13, alignSelf: "center" }}>{err}</span>}<button onClick={execOrder} disabled={guardando} style={mkBtn("primary")}>{guardando ? "Procesando…" : "▶️ Ejecutar orden"}</button>
             </div>
           </>
         )}

@@ -1,161 +1,87 @@
 import { useState } from "react";
-import { fDate } from "../utils/businessLogic.js";
-import { getCategoryName } from "../categories.js";
+import toast from "react-hot-toast";
+import { fDate, fDateTime } from "../utils/businessLogic.js";
+import { DEFAULT_CATEGORY_ID, getCategoryName } from "../categories.js";
 import { xlsx } from "../utils/xlsxExport.js";
 import { C } from "../theme.jsx";
 import { card, mkBtn } from "../styles.js";
 import { Header } from "./ui/Header.jsx";
 
+const r2 = v => Math.round((Number(v) || 0) * 100) / 100;
+
 export function Exportar({ D }) {
-  const { sales, customers, products, expenses, inventory, suppliers, purchases, orders, categories } = D;
+  const { sales, customers, products, expenses, suppliers, purchases, orders, movements } = D;
+  const categories = [{ id: DEFAULT_CATEGORY_ID, name: "Sin categoría" }, ...D.categories];
   const [exporting, setExporting] = useState(false);
+  const vigentes = sales.filter(s => !s.anulada);
 
   const doExport = async () => {
     setExporting(true);
     try {
       await xlsx([
-        {
-          name: "Ventas",
-          data: sales.map(s => ({
-            ID: s.id,
-            Fecha: fDate(s.date || s.createdAt),
-            Cliente: s.customerName || "—",
-            Items: s.items?.length || 0,
-            Total: s.total?.toFixed(2) || "0.00",
-            Pagado: s.paid?.toFixed(2) || "0.00",
-            Deuda: ((s.total || 0) - (s.paid || 0)).toFixed(2),
-            "Método de pago": s.paymentMethod || "—",
-            Estado: s.status || "—",
-          })),
-        },
-        {
-          name: "Clientes",
-          data: customers.map(c => ({
-            ID: c.id,
-            Nombre: c.name,
-            Teléfono: c.phone || "—",
-            Dirección: c.address || "—",
-            Ciudad: c.city || "—",
-            Zona: c.zone || "—",
-            "Deuda total": (sales.filter(s => s.customerId === c.id).reduce((a, s) => a + ((s.total || 0) - (s.paid || 0)), 0)).toFixed(2),
-          })),
-        },
-        {
-          name: "Productos",
-          data: products.map(p => ({
-            ID: p.id,
-            Nombre: p.name,
-            Categoría: getCategoryName(categories, p.cat),
-            "Precio venta": p.price?.toFixed(2) || "0.00",
-            "Precio mayorista": p.wholesalePrice?.toFixed(2) || "0.00",
-            "Precio costo": p.costPrice?.toFixed(2) || "0.00",
-            Unidad: p.unit || "—",
-            Stock: inventory.filter(i => i.productId === p.id).reduce((a, i) => a + (i.qty || 0), 0),
-          })),
-        },
-        {
-          name: "Inventario",
-          data: inventory.map(i => {
-            const p = products.find(x => x.id === i.productId);
-            return {
-              Producto: p?.name || i.productId,
-              Categoría: p ? getCategoryName(categories, p.cat) : "—",
-              Lote: i.lote || "—",
-              Cantidad: i.qty,
-              "Fecha venc.": i.expiry ? fDate(i.expiry) : "—",
-              Ubicación: i.location || "—",
-              Notas: i.notes || "—",
-            };
-          }),
-        },
-        {
-          name: "Gastos",
-          data: expenses.filter(e => e.type === "gasto").map(e => ({
-            Fecha: fDate(e.date || e.createdAt),
-            Categoría: e.category || "—",
-            Descripción: e.description,
-            Responsable: e.responsable || "—",
-            "Monto(Bs)": (e.amount || 0).toFixed(2),
-            Notas: e.notes || "—",
-          })),
-        },
-        {
-          name: "Proveedores",
-          data: suppliers.map(s => ({
-            ID: s.id,
-            Nombre: s.name,
-            Teléfono: s.phone || "—",
-            Dirección: s.address || "—",
-            Producto: s.product || "—",
-            "Total compras": purchases.filter(p => p.supplierId === s.id).reduce((a, p) => a + p.total, 0).toFixed(2),
-            "Deuda total": purchases.filter(p => p.supplierId === s.id).reduce((a, p) => a + p.debt, 0).toFixed(2),
-          })),
-        },
-        {
-          name: "Compras_Proveedores",
-          data: purchases.map(p => ({
-            Proveedor: p.supplierName || "—",
-            Producto: p.product,
-            Fecha: fDate(p.date),
-            Cantidad: p.qty,
-            "Precio unitario": p.price?.toFixed(2) || "0.00",
-            Total: p.total?.toFixed(2) || "0.00",
-            Pagado: p.paid?.toFixed(2) || "0.00",
-            Deuda: p.debt?.toFixed(2) || "0.00",
-          })),
-        },
-        {
-          name: "Produccion",
-          data: orders.map(o => ({
-            Fecha: fDate(o.date || o.createdAt),
-            Fórmula: o.formulaName || "—",
-            Cantidad: o.qty,
-            "Costo total": o.totalCost?.toFixed(2) || "0.00",
-            "Costo/unidad": o.costPerUnit?.toFixed(2) || "0.00",
-            "Valor producido": o.revenue?.toFixed(2) || "0.00",
-            "Margen(%)": o.margin || 0,
-          })),
-        },
-      ], "moxi_business_export.xlsx");
+        { name: "Ventas", data: sales.map(s => ({
+          "N°": s.numero, Fecha: fDateTime(s.date), Cliente: s.customerName, Estado: s.anulada ? "ANULADA" : s.debt > 0 ? "Pendiente" : "Pagada",
+          Subtotal: r2(s.subtotal), Descuento: r2(s.discount), Total: r2(s.total), Pagado: r2(s.paid), Deuda: r2(s.debt),
+          "Método de pago": s.paymentMethod, Notas: s.notes || "",
+        })) },
+        { name: "Detalle_ventas", data: sales.flatMap(s => s.items.map(i => ({
+          "N° venta": s.numero, Fecha: fDate(s.date), Cliente: s.customerName, Anulada: s.anulada ? "Sí" : "No",
+          Producto: i.name, Cantidad: i.qty, Unidad: i.unit, "Precio unitario": r2(i.unitPrice), Subtotal: r2(i.sub), "Costo unitario": r2(i.cost),
+        }))) },
+        { name: "Cobros", data: vigentes.flatMap(s => s.payments.map(p => ({ "N° venta": s.numero, Cliente: s.customerName, Fecha: fDateTime(p.date), Método: p.method, Monto: r2(p.amount) }))) },
+        { name: "Clientes", data: customers.map(c => ({
+          Nombre: c.name, "CI/NIT": c.ci, Teléfono: c.phone, Mercado: c.market, Dirección: c.address,
+          "Total comprado": r2(vigentes.filter(s => s.customerId === c.id).reduce((a, s) => a + s.total, 0)),
+          Deuda: r2(vigentes.filter(s => s.customerId === c.id).reduce((a, s) => a + s.debt, 0)),
+          Notas: c.notes,
+        })) },
+        { name: "Productos", data: products.map(p => ({
+          Nombre: p.name, Categoría: getCategoryName(categories, p.cat), Código: p.barcode, Unidad: p.unit,
+          "Precio venta": r2(p.price), Costo: r2(p.cost), Stock: p.stock, "Stock mínimo": p.minStock,
+          "Valor a costo": r2(Math.max(0, p.stock) * p.cost), "Valor a precio": r2(Math.max(0, p.stock) * p.price),
+        })) },
+        { name: "Kardex", data: movements.map(m => ({ Fecha: fDateTime(m.date), Tipo: m.type, Producto: m.productName, Cantidad: m.qty, "Stock antes": m.stockBefore, "Stock después": m.stockAfter, Costo: r2(m.cost), Usuario: m.user, Notas: m.notes })) },
+        { name: "Gastos_e_ingresos", data: expenses.map(e => ({ Fecha: fDate(e.date), Tipo: e.type === "ingreso" ? "Ingreso" : "Gasto", Categoría: e.category, Descripción: e.description, Monto: r2(e.amount), Registró: e.responsable, Notas: e.notes })) },
+        { name: "Proveedores", data: suppliers.map(s => ({
+          Nombre: s.name, Teléfono: s.phone, Ubicación: s.address, Rubro: s.product,
+          "Total compras": r2(purchases.filter(p => p.supplierId === s.id).reduce((a, p) => a + p.total, 0)),
+          "Deuda pendiente": r2(purchases.filter(p => p.supplierId === s.id).reduce((a, p) => a + p.debt, 0)),
+        })) },
+        { name: "Compras", data: purchases.map(p => ({ "N°": p.numero, Fecha: fDate(p.date), Proveedor: p.supplierName, Productos: p.product, Total: r2(p.total), Pagado: r2(p.paid), Deuda: r2(p.debt), Notas: p.notes })) },
+        { name: "Produccion", data: orders.map(o => ({ Fecha: fDate(o.date), Fórmula: o.formulaName, Lotes: o.batches, "Insumo usado": o.inputUsed, Producido: o.outputProduced, "Costo total": r2(o.totalCost), "Costo/unidad": r2(o.costPerUnit), "Margen %": o.margin, Estado: o.anulada ? "Anulada" : "OK" })) },
+      ], `moxi_${new Date().toISOString().slice(0, 10)}.xlsx`);
+      toast.success("Archivo descargado");
+    } catch (e) {
+      toast.error("No se pudo generar el archivo: " + e.message);
     } finally {
       setExporting(false);
     }
   };
 
   const stats = [
-    ["Ventas registradas", sales.length, "🛒"],
-    ["Clientes", customers.length, "👥"],
-    ["Productos", products.length, "📦"],
-    ["Registros de inventario", inventory.length, "🏷️"],
-    ["Gastos registrados", expenses.filter(e => e.type === "gasto").length, "📤"],
-    ["Proveedores", suppliers.length, "🚛"],
-    ["Compras a proveedores", purchases.length, "🧾"],
-    ["Órdenes de producción", orders.length, "🏭"],
+    ["Ventas", vigentes.length, "🛒"], ["Clientes", customers.length, "👥"], ["Productos", products.length, "📦"],
+    ["Movimientos de kardex", movements.length, "🏷️"], ["Gastos e ingresos", expenses.length, "📤"],
+    ["Proveedores", suppliers.length, "🚛"], ["Compras", purchases.length, "🧾"], ["Producción", orders.length, "🏭"],
   ];
 
   return (
     <div>
-      <Header title="Exportar datos" sub="Descarga toda la información del negocio en Excel" />
-
+      <Header title="Exportar datos" sub="Descarga la información del negocio en Excel" />
       <div style={{ ...card(), marginBottom: 18 }}>
-        <div style={{ fontWeight: 700, fontSize: 14, marginBottom: 14 }}>Resumen del contenido a exportar</div>
+        <div style={{ fontWeight: 700, fontSize: 14, marginBottom: 14 }}>Contenido (últimos 12 meses de ventas y gastos)</div>
         <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill,minmax(200px,1fr))", gap: 8 }}>
           {stats.map(([label, count, icon]) => (
             <div key={label} style={{ display: "flex", alignItems: "center", gap: 10, padding: "10px 12px", background: C.bg, borderRadius: 10, border: `1px solid ${C.border}` }}>
               <span style={{ fontSize: 22 }}>{icon}</span>
-              <div>
-                <div style={{ fontSize: 18, fontWeight: 800, color: C.red, lineHeight: 1 }}>{count}</div>
-                <div style={{ fontSize: 11, color: C.textFaint, marginTop: 2 }}>{label}</div>
-              </div>
+              <div><div style={{ fontSize: 18, fontWeight: 800, color: C.red, lineHeight: 1 }}>{count}</div><div style={{ fontSize: 11, color: C.textFaint, marginTop: 2 }}>{label}</div></div>
             </div>
           ))}
         </div>
       </div>
-
       <div style={{ ...card(), textAlign: "center", padding: 40 }}>
         <div style={{ fontSize: 48, marginBottom: 12 }}>📊</div>
         <div style={{ fontWeight: 700, fontSize: 16, marginBottom: 8 }}>Exportar todo a Excel</div>
-        <div style={{ fontSize: 13, color: C.textMid, marginBottom: 24 }}>Se generará un archivo .xlsx con 8 hojas: Ventas, Clientes, Productos, Inventario, Gastos, Proveedores, Compras y Producción.</div>
+        <div style={{ fontSize: 13, color: C.textMid, marginBottom: 24 }}>Un archivo .xlsx con 10 hojas: ventas, detalle de ventas, cobros, clientes, productos, kardex, gastos e ingresos, proveedores, compras y producción.</div>
         <button onClick={doExport} disabled={exporting} style={{ ...mkBtn("primary"), padding: "12px 32px", fontSize: 15, opacity: exporting ? 0.7 : 1 }}>
           {exporting ? "Generando archivo..." : "⬇️ Descargar Excel completo"}
         </button>

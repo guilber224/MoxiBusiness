@@ -1,7 +1,7 @@
 import { BarChart, Bar, PieChart, Pie, Cell, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from "recharts";
 import { n, pct } from "../utils/businessLogic.js";
 import { Bs } from "../currency.js";
-import { getCategoryName } from "../categories.js";
+import { DEFAULT_CATEGORY_ID, getCategoryName } from "../categories.js";
 import { C, SECTORS_COLORS } from "../theme.jsx";
 import { card, mkBadge } from "../styles.js";
 import { KPI } from "./ui/KPI.jsx";
@@ -10,17 +10,23 @@ import { Empty } from "./ui/Empty.jsx";
 import { Table } from "./ui/Table.jsx";
 
 export function Analisis({ D }) {
-  const { sales, customers, products, expenses, orders, categories } = D;
+  const { customers, products, expenses } = D;
+  const categories = [{ id: DEFAULT_CATEGORY_ID, name: "Sin categoría" }, ...D.categories];
+  const sales = D.sales.filter(s => !s.anulada);
+  const orders = D.orders.filter(o => !o.anulada);
   const totalSales = sales.reduce((a, s) => a + s.total, 0);
   const totalPaid = sales.reduce((a, s) => a + s.paid, 0);
   const totalExpenses = expenses.filter(e => e.type === "gasto").reduce((a, e) => a + e.amount, 0);
-  const grossMargin = totalSales > 0 ? ((totalSales - totalExpenses) / totalSales * 100) : 0;
-  const purchaseCost = expenses.filter(e => e.category === "Compra de ají").reduce((a, e) => a + e.amount, 0);
-  const breakEven = totalSales > 0 && totalSales !== totalExpenses ? (totalExpenses / (1 - purchaseCost / totalSales)).toFixed(0) : 0;
+  // Costo de lo vendido: costo registrado al momento de cada venta (o el costo actual si no existía)
+  const costoVentas = sales.reduce((a, s) => a + s.items.reduce((b, it) => b + n(it.qty) * (n(it.cost) || n(products.find(p => p.id === it.productId)?.cost)), 0), 0);
+  const utilidadBruta = totalSales - costoVentas;
+  const grossMargin = totalSales > 0 ? (utilidadBruta / totalSales * 100) : 0;
+  const utilidadNeta = utilidadBruta - totalExpenses;
+  const sinCostos = products.length > 0 && products.every(p => !(p.cost > 0));
 
   const prodRev = {};
   sales.forEach(s => s.items.forEach(it => { prodRev[it.productId] = (prodRev[it.productId] || 0) + n(it.subtotal ?? it.sub); }));
-  const topProds = Object.entries(prodRev).map(([id, rev]) => { const p = products.find(x => x.id === id); return { name: p?.name || "?", rev, units: sales.flatMap(s => s.items.filter(i => i.productId === id)).reduce((a, i) => a + n(i.qty), 0) }; }).sort((a, b) => b.rev - a.rev).slice(0, 8);
+  const topProds = Object.entries(prodRev).map(([id, rev]) => { const p = products.find(x => x.id === id); return { name: p?.name || sales.flatMap(s => s.items).find(i => i.productId === id)?.name || "Producto eliminado", rev, units: sales.flatMap(s => s.items.filter(i => i.productId === id)).reduce((a, i) => a + n(i.qty), 0) }; }).sort((a, b) => b.rev - a.rev).slice(0, 8);
   const topSoldProducts = topProds.slice().sort((a, b) => b.units - a.units).slice(0, 3);
 
   const topClients = customers.map(c => ({ name: c.name, total: sales.filter(s => s.customerId === c.id).reduce((a, s) => a + s.total, 0), purchases: sales.filter(s => s.customerId === c.id).length })).sort((a, b) => b.total - a.total).slice(0, 6);
@@ -35,13 +41,14 @@ export function Analisis({ D }) {
     <div>
       <Header title="Análisis y Rentabilidad" sub="Indicadores clave del negocio" />
       <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(155px,1fr))", gap: 10, marginBottom: 18 }}>
-        <KPI label="Margen bruto estimado" value={`${Math.round(grossMargin)}%`} sub="(ventas - gastos)" color={grossMargin > 30 ? C.green : grossMargin > 10 ? C.amber : C.red} Icon="📊" />
-        <KPI label="Total facturado" value={Bs(totalSales)} color={C.red} Icon="🛒" />
-        <KPI label="Total cobrado" value={Bs(totalPaid)} sub={`${pct(totalPaid, totalSales)}% de lo facturado`} color={C.green} Icon="✅" />
+        <KPI label="Margen bruto" value={sinCostos ? "—" : `${Math.round(grossMargin)}%`} sub={sinCostos ? "Carga el costo de tus productos" : `Utilidad bruta ${Bs(utilidadBruta)}`} color={grossMargin > 30 ? C.green : grossMargin > 10 ? C.amber : C.red} Icon="📊" />
+        <KPI label="Utilidad neta" value={sinCostos ? "—" : Bs(utilidadNeta)} sub="Utilidad bruta − gastos" color={utilidadNeta >= 0 ? C.green : C.red} Icon="💰" />
+        <KPI label="Total vendido" value={Bs(totalSales)} sub="Últimos 12 meses" color={C.red} Icon="🛒" />
+        <KPI label="Total cobrado" value={Bs(totalPaid)} sub={`${pct(totalPaid, totalSales)}% de lo vendido`} color={C.green} Icon="✅" />
         <KPI label="Total gastos" value={Bs(totalExpenses)} color={C.amber} Icon="📤" />
       </div>
 
-      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12, marginBottom: 14 }}>
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(280px,1fr))", gap: 12, marginBottom: 14 }}>
         <div style={card()}>
           <div style={{ fontWeight: 700, fontSize: 13, marginBottom: 12 }}>📦 Top 3 productos más vendidos</div>
           {topSoldProducts.length === 0 ? <Empty icon="📦" title="Sin datos" sub="Registra ventas para ver el análisis" /> :

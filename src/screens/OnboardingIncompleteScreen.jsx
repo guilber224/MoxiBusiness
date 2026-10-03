@@ -6,7 +6,7 @@ import { BrandLogo } from "../components/ui/BrandLogo.jsx";
 // ╔══════════════════════════════════════════════════════════════════════╗
 // ║  ONBOARDING INCOMPLETE                                              ║
 // ╚══════════════════════════════════════════════════════════════════════╝
-export function OnboardingIncompleteScreen({ onRetry, onLogout }) {
+export function OnboardingIncompleteScreen({ onRetry, onLogout, desactivado = false }) {
   const [loading, setLoading] = useState(false);
   const handleRetry = async () => {
     setLoading(true);
@@ -24,18 +24,19 @@ export function OnboardingIncompleteScreen({ onRetry, onLogout }) {
         <div style={{ background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.08)", borderRadius: R.xl, padding: "24px 24px 24px" }}>
           <div style={{ fontSize: 32, textAlign: "center", marginBottom: 16 }}>⚠️</div>
           <div style={{ color: "white", fontWeight: 700, fontSize: 16, marginBottom: 8, textAlign: "center" }}>
-            Tu empresa aún no terminó de configurarse
+            {desactivado ? "Tu cuenta está desactivada" : "Tu empresa aún no terminó de configurarse"}
           </div>
           <div style={{ color: "rgba(255,255,255,0.4)", fontSize: 13, marginBottom: 24, lineHeight: 1.7, textAlign: "center" }}>
-            El registro de empresa está incompleto y no se puede acceder al sistema sin un identificador de empresa válido.
-            Puede ser un problema temporal. Reintenta o cierra sesión y vuelve a registrarte.
+            {desactivado
+              ? "Un administrador de tu empresa desactivó esta cuenta. Pídele que la vuelva a activar desde Ajustes."
+              : "El registro de empresa está incompleto y no se puede acceder al sistema sin un identificador de empresa válido. Puede ser un problema temporal. Reintenta o cierra sesión y vuelve a registrarte."}
           </div>
           <button
             onClick={handleRetry}
             disabled={loading}
             style={{ ...mkBtn("primary"), width: "100%", justifyContent: "center", padding: "10px", fontSize: 14, marginBottom: 10, background: loading ? "#7F1D1D" : "#B91C1C" }}
           >
-            {loading ? "Verificando..." : "Reintentar onboarding"}
+            {loading ? "Verificando..." : desactivado ? "Volver a comprobar" : "Reintentar"}
           </button>
           <button
             onClick={onLogout}

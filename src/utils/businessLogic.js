@@ -13,12 +13,21 @@ export const PERIOD_OPTIONS = [
   ["5y", "5 Años"],
 ];
 export const pct = (a, b) => b === 0 ? 0 : Math.round((a / b) * 100);
-export const today = () => new Date().toISOString().slice(0, 10);
-export const fDate = d => { try { return new Date(d).toLocaleDateString("es-BO", { day: "2-digit", month: "2-digit", year: "numeric" }); } catch { return "—"; } };
-export const fShort = d => { try { return new Date(d).toLocaleDateString("es-BO", { day: "2-digit", month: "short" }); } catch { return "—"; } };
+// Fecha local (no UTC): en Bolivia (UTC-4) toISOString() devolvía el día siguiente desde las 20:00.
+export const today = () => { const d = new Date(); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`; };
+// "2026-10-03" se interpreta como fecha local; new Date("2026-10-03") la toma como UTC y la muestra el día anterior.
+export const parseFecha = d => {
+  if (d instanceof Date) return d;
+  if (typeof d === "string" && /^d{4}-d{2}-d{2}$/.test(d)) { const [y, m, dd] = d.split("-").map(Number); return new Date(y, m - 1, dd, 12); }
+  return new Date(d);
+};
+const valida = d => d != null && d !== "" && !Number.isNaN(parseFecha(d).getTime());
+export const fDate = d => (valida(d) ? parseFecha(d).toLocaleDateString("es-BO", { day: "2-digit", month: "2-digit", year: "numeric" }) : "—");
+export const fShort = d => (valida(d) ? parseFecha(d).toLocaleDateString("es-BO", { day: "2-digit", month: "short" }) : "—");
 export const fDateTime = d => {
+  if (!valida(d)) return "—";
   try {
-    return new Date(d).toLocaleString("es-BO", {
+    return parseFecha(d).toLocaleString("es-BO", {
       day: "2-digit",
       month: "2-digit",
       year: "numeric",
@@ -91,7 +100,7 @@ export const getPeriodStart = (period, now = new Date()) => {
 };
 export const isWithinPeriod = (value, period) => {
   if (!value) return false;
-  const date = new Date(value);
+  const date = parseFecha(value);
   if (Number.isNaN(date.getTime())) return false;
   if (period === "today") return date.toDateString() === new Date().toDateString();
   return date >= getPeriodStart(period);

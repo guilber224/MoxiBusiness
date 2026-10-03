@@ -2,13 +2,10 @@ import { useState, useMemo, useRef } from "react";
 import {
   X, Printer, FileText, Plus, Copy, ArrowRight, ShoppingCart, Trash2, Search,
 } from "lucide-react";
-import { pedidosService } from "../services/pedidosService.js";
-import { ventasService } from "../services/ventasService.js";
-import { isSupabaseUUID } from "../utils/storageScope.js";
 import { n, uid, today, fDate } from "../utils/businessLogic.js";
 import { Bs, getCurrencySymbol } from "../currency.js";
-import { generateId } from "../empresaScope.js";
-import { DEFAULT_CATEGORIES, getCategoryName } from "../categories.js";
+import { useAccion } from "../hooks/useAccion.js";
+import { DEFAULT_CATEGORY_ID, getCategoryName } from "../categories.js";
 import { safeBusinessName, C, R, FONT } from "../theme.jsx";
 import { card, mkBtn, mkBadge } from "../styles.js";
 import { useIsMobile } from "../hooks/useIsMobile.js";
@@ -154,11 +151,13 @@ function DocumentoModal({ doc, config, onClose }) {
 // ╔══════════════════════════════════════════════════════════════════════╗
 // ║  PEDIDOS Y COTIZACIONES                                             ║
 // ╚══════════════════════════════════════════════════════════════════════╝
-export function Pedidos({ D, save, user, config, logAction, onRefreshDashboard }) {
-  const { pedidos = [], customers = [], products = [], inventory = [], categories = [] } = D;
+export function Pedidos({ D, A, user }) {
+  const { pedidos = [], customers = [], products = [] } = D;
+  const config = D.config;
+  const [ejecutar, guardando] = useAccion();
   const isMobile = useIsMobile();
   const GUEST = { id: "__guest__", name: "Público general", market: "", phone: "" };
-  const categoryOptions = categories.length ? categories : DEFAULT_CATEGORIES;
+  const categoryOptions = [{ id: DEFAULT_CATEGORY_ID, name: "Sin categoría" }, ...D.categories];
 
   const [vista, setVista] = useState("cotizacion");
   const [q, setQ] = useState("");
@@ -235,7 +234,7 @@ export function Pedidos({ D, save, user, config, logAction, onRefreshDashboard }
     const isEdit = Boolean(editing);
     const numero = isEdit ? editing.numero : nextNumero(form.tipo);
     const doc = {
-      id: isEdit ? editing.id : generateId(),
+      id: isEdit ? editing.id : crypto.randomUUID(),
       numero, codigo: codigoDoc(form.tipo, numero),
       tipo: form.tipo, estado: form.estado,
       customerId: form.customerId, customerName: cust.name, customerMarket: cust.market || "", customerPhone: cust.phone || "",
@@ -250,129 +249,60 @@ export function Pedidos({ D, save, user, config, logAction, onRefreshDashboard }
       updatedAt: new Date().toISOString(),
       empresa_id: user.empresa_id,
     };
-    // Optimista: se muestra al instante; si Supabase lo rechaza se revierte y se avisa.
-    const previo = isEdit ? pedidos.find(p => p.id === doc.id) : null;
-    save("pedidos", cur => isEdit ? (cur || []).map(p => p.id === doc.id ? doc : p) : [doc, ...(cur || [])]);
-    logAction?.(`${user.name} ${isEdit ? "actualizó" : "creó"} ${form.tipo === "cotizacion" ? "la cotización" : "el pedido"} ${doc.codigo}`);
+    const guardado = await ejecutar(() => A.guardarPedido(doc));
+    if (!guardado) return;
+    A.log(`${user.name} ${isEdit ? "actualizó" : "creó"} ${form.tipo === "cotizacion" ? "la cotización" : "el pedido"} ${doc.codigo}`);
     setVista(form.tipo);
     closeForm();
-    flash(`${form.tipo === "cotizacion" ? "Cotización" : "Pedido"} ${doc.codigo} guardado correctamente.`);
-    let result;
-    try {
-      result = isEdit
-        ? await pedidosService.updatePedido(doc.id, doc, user?.empresa_id)
-        : await pedidosService.createPedido(doc, user);
-    } catch (e) { console.warn("Pedido Supabase error:", e.message); result = { _localOnly: true }; }
-    if (result?._localOnly && isSupabaseUUID(user?.empresa_id)) {
-      save("pedidos", cur => isEdit ? (cur || []).map(p => p.id === doc.id ? previo : p) : (cur || []).filter(p => p.id !== doc.id));
-      setErr(`⚠ Error Supabase al guardar ${doc.codigo}. No se guardó — revisa tu conexión e intenta de nuevo.`);
-    }
+    flash(`${form.tipo === "cotizacion" ? "Cotización" : "Pedido"} ${doc.codigo} ${isEdit ? "actualizado" : "guardado"}.`);
   };
 
   const changeEstado = async (doc, estado) => {
-    const prev = pedidos;
-    const updated = { ...doc, estado, updatedAt: new Date().toISOString() };
-    save("pedidos", pedidos.map(p => p.id === doc.id ? updated : p));
-    let result;
-    try { result = await pedidosService.updatePedido(doc.id, { estado, updatedAt: updated.updatedAt }, user?.empresa_id); }
-    catch (e) { console.warn("Pedido estado Supabase error:", e.message); }
-    if (result?._localOnly && isSupabaseUUID(user?.empresa_id)) {
-      save("pedidos", prev);
-      setErr("⚠ Error Supabase al cambiar el estado. Se revirtió — revisa tu conexión e intenta de nuevo.");
-      return;
-    }
-    logAction?.(`${user.name} cambió ${doc.codigo} a "${estadoMeta(doc.tipo, estado).label}"`);
+    const ok = await ejecutar(() => A.actualizarPedido(doc.id, { estado }));
+    if (ok) A.log(`${user.name} cambió ${doc.codigo} a "${estadoMeta(doc.tipo, estado).label}"`);
   };
 
   const convertToPedido = async doc => {
     const numero = nextNumero("pedido");
-    const nuevo = { ...doc, id: generateId(), numero, codigo: codigoDoc("pedido", numero), tipo: "pedido", estado: "pendiente", validUntil: null, deliveryDate: today(), convertedFromQuoteId: doc.id, convertedToSaleId: null, createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() };
-    const quoteUpd = { ...doc, estado: "aceptada", updatedAt: new Date().toISOString() };
-    // Optimista: el pedido nuevo y la cotización aceptada se ven al instante.
-    save("pedidos", cur => [nuevo, ...(cur || []).map(p => p.id === doc.id ? quoteUpd : p)]);
-    setVista("pedido");
+    const nuevo = { ...doc, id: crypto.randomUUID(), numero, codigo: codigoDoc("pedido", numero), tipo: "pedido", estado: "pendiente", validUntil: null, deliveryDate: today(), convertedFromQuoteId: doc.id, convertedToSaleId: null, createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() };
+    const ok = await ejecutar(async () => {
+      await A.guardarPedido(nuevo);
+      await A.actualizarPedido(doc.id, { estado: "aceptada" });
+    });
+    if (!ok) return;
+    A.log(`${user.name} convirtió la cotización ${doc.codigo} en el pedido ${nuevo.codigo}`);
     flash(`Cotización convertida en el pedido ${nuevo.codigo}.`);
-    // Crear el pedido y marcar la cotización en paralelo
-    const [created, estadoRes] = await Promise.all([
-      pedidosService.createPedido(nuevo, user).catch(e => { console.warn("convertToPedido Supabase error:", e.message); return { _localOnly: true }; }),
-      pedidosService.updatePedido(doc.id, { estado: "aceptada" }, user?.empresa_id).catch(e => { console.warn("convertToPedido estado Supabase error:", e.message); return null; }),
-    ]);
-    if (created?._localOnly && isSupabaseUUID(user?.empresa_id)) {
-      save("pedidos", cur => (cur || []).filter(p => p.id !== nuevo.id).map(p => p.id === doc.id ? doc : p));
-      if (!estadoRes?._localOnly) pedidosService.updatePedido(doc.id, { estado: doc.estado }, user?.empresa_id).catch(() => {});
-      setErr("⚠ Error Supabase al crear el pedido. No se guardó — revisa tu conexión e intenta de nuevo.");
-      return;
-    }
-    if (estadoRes?._localOnly && isSupabaseUUID(user?.empresa_id)) {
-      flash(`Pedido ${nuevo.codigo} creado, pero no se pudo marcar la cotización como aceptada en Supabase (revisa tu conexión).`);
-    }
-    logAction?.(`${user.name} convirtió la cotización ${doc.codigo} en el pedido ${nuevo.codigo}`);
+    setVista("pedido");
   };
 
+  // La venta, el descuento de stock y el pedido "entregado" se guardan en una sola transacción
   const convertToVenta = async doc => {
     if (doc.convertedToSaleId) { setErr("Este pedido ya fue registrado como venta."); return; }
-    const prodMap = {};
-    doc.items.forEach(it => { prodMap[it.productId] = (prodMap[it.productId] || 0) + n(it.qty); });
-    const sale = {
-      id: generateId(), numero: Date.now(),
-      customerId: doc.customerId, customerName: doc.customerName, customerMarket: doc.customerMarket || "",
-      date: new Date().toISOString(),
-      items: doc.items.map(it => ({ ...it, image: null, original_price: it.unitPrice, sale_price: it.unitPrice, sub: it.sub ?? it.subtotal, subtotal: it.sub ?? it.subtotal })),
-      subtotal: doc.subtotal, discount: doc.discount, discountType: doc.discountType,
-      total: doc.total, paid: 0, debt: doc.total, notes: doc.notes || `Pedido ${doc.codigo}`, paymentMethod: "efectivo", payments: [],
-      createdAt: new Date().toISOString(), empresa_id: user.empresa_id,
-    };
     setErr("");
-    // Optimista: venta, stock y estado del pedido se actualizan al instante (y el botón
-    // deja de ofrecer convertir, evitando dobles conversiones). Si Supabase rechaza la venta, se revierte todo.
-    const prevStock = new Map(inventory.filter(i => prodMap[i.productId]).map(i => [i.productId, i.stock]));
-    const updated = { ...doc, estado: "entregado", convertedToSaleId: sale.id, updatedAt: new Date().toISOString() };
-    save("sales", cur => [sale, ...(cur || [])]);
-    save("inventory", cur => (cur || []).map(i => { const qty = prodMap[i.productId]; return qty ? { ...i, stock: Math.max(0, i.stock - qty) } : i; }));
-    save("pedidos", cur => (cur || []).map(p => p.id === doc.id ? updated : p));
-    flash(`Pedido ${doc.codigo} registrado como venta. Stock descontado.`);
-    onRefreshDashboard?.();
-
-    let nueva;
-    try { nueva = await ventasService.createVenta(sale, user); }
-    catch (e) { console.warn("convertToVenta Supabase error:", e.message); nueva = { _localOnly: true }; }
-    if (nueva?._localOnly && isSupabaseUUID(user?.empresa_id)) {
-      save("sales", cur => (cur || []).filter(s => s.id !== sale.id));
-      save("inventory", cur => (cur || []).map(i => prevStock.has(i.productId) ? { ...i, stock: prevStock.get(i.productId) } : i));
-      save("pedidos", cur => (cur || []).map(p => p.id === doc.id ? doc : p));
-      setErr("⚠ Error Supabase al registrar la venta. Se revirtió el stock y el pedido — revisa tu conexión e intenta de nuevo.");
-      return;
-    }
-    const pedidoRes = await pedidosService.updatePedido(doc.id, { estado: "entregado", convertedToSaleId: sale.id }, user?.empresa_id)
-      .catch(e => { console.warn("convertToVenta pedido estado Supabase error:", e.message); return null; });
-    logAction?.(`${user.name} registró la venta del pedido ${doc.codigo} por ${Bs(doc.total)}`);
-    if (pedidoRes?._localOnly && isSupabaseUUID(user?.empresa_id)) {
-      flash(`Venta del pedido ${doc.codigo} registrada, pero no se pudo marcar el pedido como convertido en Supabase. No lo conviertas de nuevo — revisa tu conexión y recarga.`);
-    }
+    const venta = await ejecutar(() => A.registrarVenta({
+      customerId: doc.customerId, customerName: doc.customerName, pedidoId: doc.id,
+      items: (doc.items || []).map(it => ({ productId: it.productId, name: it.name, unit: it.unit, qty: n(it.qty), unitPrice: n(it.unitPrice) })),
+      discount: n(doc.discount), discountType: "amount",
+      payments: [], notes: doc.notes || `Pedido ${doc.codigo}`,
+    }));
+    if (!venta) return;
+    flash(`Pedido ${doc.codigo} registrado como venta #${venta.numero}. Stock descontado; el saldo queda en Deudas.`);
   };
 
   const duplicate = async doc => {
     const numero = nextNumero(doc.tipo);
-    const nuevo = { ...doc, id: generateId(), numero, codigo: codigoDoc(doc.tipo, numero), estado: doc.tipo === "cotizacion" ? "borrador" : "pendiente", convertedToSaleId: null, convertedFromQuoteId: null, date: today(), createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() };
-    save("pedidos", cur => [nuevo, ...(cur || [])]);
-    flash(`Documento duplicado como ${nuevo.codigo}.`);
-    let created;
-    try { created = await pedidosService.createPedido(nuevo, user); }
-    catch (e) { console.warn("duplicate pedido Supabase error:", e.message); created = { _localOnly: true }; }
-    if (created?._localOnly && isSupabaseUUID(user?.empresa_id)) {
-      save("pedidos", cur => (cur || []).filter(p => p.id !== nuevo.id));
-      setErr("⚠ Error Supabase al duplicar. No se guardó — revisa tu conexión e intenta de nuevo.");
-    }
+    const nuevo = { ...doc, id: crypto.randomUUID(), numero, codigo: codigoDoc(doc.tipo, numero), estado: doc.tipo === "cotizacion" ? "borrador" : "pendiente", convertedToSaleId: null, convertedFromQuoteId: null, date: today(), createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() };
+    const ok = await ejecutar(() => A.guardarPedido(nuevo));
+    if (ok) flash(`Documento duplicado como ${nuevo.codigo}.`);
   };
 
   const doDelete = async () => {
     if (!deleteTarget) return;
-    const target = deleteTarget; const prev = pedidos;
-    save("pedidos", pedidos.filter(p => p.id !== target.id));
+    const target = deleteTarget;
+    const ok = await ejecutar(() => A.eliminarPedido(target.id));
+    if (!ok) return;
     setDeleteTarget(null);
-    const res = await pedidosService.deletePedido(target.id, user?.empresa_id);
-    if (res && res.ok === false) { save("pedidos", prev); setErr("No se pudo eliminar en Supabase. Se restauró el documento."); return; }
-    logAction?.(`${user.name} eliminó ${target.tipo === "cotizacion" ? "la cotización" : "el pedido"} ${target.codigo}`);
+    A.log(`${user.name} eliminó ${target.tipo === "cotizacion" ? "la cotización" : "el pedido"} ${target.codigo}`);
     flash("Documento eliminado.");
   };
 
@@ -607,7 +537,7 @@ export function Pedidos({ D, save, user, config, logAction, onRefreshDashboard }
 
         <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
           <button onClick={closeForm} style={mkBtn("ghost")}>Cancelar</button>
-          <button onClick={doSave} style={mkBtn("primary")}>{editing ? "Guardar cambios" : `Crear ${form.tipo === "cotizacion" ? "cotización" : "pedido"}`}</button>
+          <button onClick={doSave} disabled={guardando} style={mkBtn("primary")}>{guardando ? "Guardando…" : editing ? "Guardar cambios" : `Crear ${form.tipo === "cotizacion" ? "cotización" : "pedido"}`}</button>
         </div>
       </Modal>}
 
@@ -615,7 +545,7 @@ export function Pedidos({ D, save, user, config, logAction, onRefreshDashboard }
         <div style={{ fontSize: 13, color: C.textMid, marginBottom: 16 }}>Se eliminará <strong style={{ color: C.text }}>{deleteTarget.codigo}</strong> de {deleteTarget.customerName || "Público general"}. Esta acción no se puede deshacer.</div>
         <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
           <button onClick={() => setDeleteTarget(null)} style={mkBtn("ghost")}>Cancelar</button>
-          <button onClick={doDelete} style={mkBtn("danger")}>Eliminar</button>
+          <button onClick={doDelete} disabled={guardando} style={mkBtn("danger")}>{guardando ? "Eliminando…" : "Eliminar"}</button>
         </div>
       </Modal>}
 

@@ -73,8 +73,9 @@ export const userService = {
       if (!empresaId) return [];
       const { data, error } = await supabase
         .from("usuarios")
-        .select("id, nombre, role, email, empresa_id")
-        .eq("empresa_id", empresaId);
+        .select("id, nombre, role, email, empresa_id, activo, created_at")
+        .eq("empresa_id", empresaId)
+        .order("nombre");
       if (error) {
         console.warn("[userService] getEmpresaUsuarios error:", error.message);
         return [];
@@ -83,27 +84,14 @@ export const userService = {
         id: u.id,
         name: u.nombre,
         email: u.email,
-        role: u.role,
+        role: String(u.role || "").toLowerCase(),
         empresa_id: u.empresa_id,
+        active: u.activo !== false,
+        createdAt: u.created_at,
       }));
     } catch (e) {
       console.warn("[userService] getEmpresaUsuarios exception:", e.message);
       return [];
-    }
-  },
-
-  async createProfile({ id, email, nombre, role, empresa_id }) {
-    try {
-      const { data, error } = await supabase
-        .from("usuarios")
-        .insert([{ id, email: email || "", nombre, role, empresa_id }])
-        .select()
-        .single();
-      if (error) throw error;
-      return data;
-    } catch (e) {
-      console.warn("userService.createProfile error:", e.message);
-      return null;
     }
   },
 
@@ -121,8 +109,19 @@ export const userService = {
       if (error) throw error;
       return { id, email, nombre, role, empresa_id };
     } catch (e) {
+      this._lastError = e.message;
       console.warn("[userService] createWorkerProfile RPC error:", e.message);
       return null;
     }
+  },
+
+  async cambiarRol(userId, role) {
+    const { error } = await supabase.rpc("usuario_cambiar_rol", { p_usuario: userId, p_role: role });
+    if (error) throw new Error(error.message);
+  },
+
+  async setActivo(userId, activo) {
+    const { error } = await supabase.rpc("usuario_desactivar", { p_usuario: userId, p_activo: activo });
+    if (error) throw new Error(error.message);
   },
 };
