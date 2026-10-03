@@ -5,42 +5,12 @@ function diasDesdeHoy(fecha) {
 }
 
 export const suscripcionService = {
-  async getOCrearTrial(empresa_id, nombreEmpresa = "") {
-    const { data, error } = await supabase
-      .from("suscripciones")
-      .select("*")
-      .eq("empresa_id", empresa_id)
-      .maybeSingle();
+  // La suscripción (y el periodo de prueba si no existe) la gestiona el servidor:
+  // desde el navegador no se pueden crear ni modificar suscripciones.
+  async getOCrearTrial() {
+    const { data, error } = await supabase.rpc("suscripcion_actual");
     if (error) throw error;
-    if (data) return data;
-
-    // Leer días de trial configurados por el superadmin (default 7)
-    let trialDias = 7;
-    try {
-      const cfg = await this.getConfig();
-      if (cfg?.trial_dias != null) trialDias = cfg.trial_dias;
-    } catch {}
-
-    const vence_el = new Date();
-    // -1 significa ilimitado: fecha muy lejana
-    if (trialDias < 0) {
-      vence_el.setFullYear(vence_el.getFullYear() + 100);
-    } else {
-      vence_el.setDate(vence_el.getDate() + trialDias);
-    }
-    const { data: created, error: ce } = await supabase
-      .from("suscripciones")
-      .insert({ empresa_id, nombre_empresa: nombreEmpresa, plan: "trial", vence_el: vence_el.toISOString().split("T")[0], activa: true })
-      .select()
-      .single();
-    if (ce) {
-      if (ce.code === "23505") {
-        const { data: existing } = await supabase.from("suscripciones").select("*").eq("empresa_id", empresa_id).maybeSingle();
-        return existing;
-      }
-      throw ce;
-    }
-    return created;
+    return data;
   },
 
   estaVencida(sus) {
@@ -129,11 +99,8 @@ export const suscripcionService = {
     return data || [];
   },
 
-  async eliminarUsuario(userId, empresaId) {
-    if (empresaId) {
-      await supabase.from("suscripciones").delete().eq("empresa_id", empresaId);
-    }
-    const { error } = await supabase.from("usuarios").delete().eq("id", userId);
+  async eliminarUsuario(userId) {
+    const { error } = await supabase.rpc("admin_eliminar_usuario", { p_usuario: userId });
     if (error) throw error;
   },
 };
