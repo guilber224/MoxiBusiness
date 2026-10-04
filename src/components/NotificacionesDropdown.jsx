@@ -1,12 +1,14 @@
 import { useState, useRef, useEffect } from "react";
-import { Bell, CheckCircle, CreditCard, AlertTriangle } from "lucide-react";
+import { Bell, CheckCircle, CreditCard, AlertTriangle, BadgeCheck, XCircle, Info, X } from "lucide-react";
 import { C, FONT } from "../theme.jsx";
 import { mkBtn, mkBadge } from "../styles.js";
 
-export function NotificacionesDropdown({ debtClients, lowStock, setTab }) {
+const AVISO_ESTILO = { ok: [BadgeCheck, C.green], error: [XCircle, C.danger], warn: [AlertTriangle, C.amber], info: [Info, "#111E7B"] };
+
+export function NotificacionesDropdown({ debtClients, lowStock, setTab, avisos = [], onDescartar }) {
   const [open, setOpen] = useState(false);
   const ref = useRef(null);
-  const total = (debtClients?.length || 0) + (lowStock?.length || 0);
+  const total = (debtClients?.length || 0) + (lowStock?.length || 0) + avisos.length;
 
   useEffect(() => {
     const handle = e => { if (ref.current && !ref.current.contains(e.target)) setOpen(false); };
@@ -38,6 +40,21 @@ export function NotificacionesDropdown({ debtClients, lowStock, setTab }) {
               </div>
             ) : (
               <>
+                {avisos.length > 0 && (
+                  <div>
+                    <div style={{ padding:"8px 16px 4px",fontSize:10,fontWeight:700,color:"var(--color-text-faint)",letterSpacing:"0.08em",textTransform:"uppercase" }}>Tu cuenta</div>
+                    {avisos.map(a => { const [Icono, color] = AVISO_ESTILO[a.tipo] || AVISO_ESTILO.info; return (
+                      <div key={a.id} style={{ display:"flex",alignItems:"flex-start",gap:10,padding:"8px 16px" }}>
+                        <div style={{ width:28,height:28,borderRadius:8,background:color+"18",display:"flex",alignItems:"center",justifyContent:"center",flexShrink:0 }}><Icono size={14} color={color} /></div>
+                        <button onClick={() => { if (a.tab) { setTab(a.tab); setOpen(false); } }} style={{ flex:1,background:"none",border:"none",padding:0,textAlign:"left",cursor:a.tab?"pointer":"default",fontFamily:FONT }}>
+                          <div style={{ fontSize:12,fontWeight:700,color:"var(--color-text)" }}>{a.titulo}</div>
+                          <div style={{ fontSize:11,color:"var(--color-text-faint)" }}>{a.texto}</div>
+                        </button>
+                        {!a.fijo && onDescartar && <button onClick={() => onDescartar(a.id)} aria-label="Descartar aviso" style={{ background:"none",border:"none",cursor:"pointer",color:"var(--color-text-faint)",padding:2 }}><X size={13} /></button>}
+                      </div>
+                    ); })}
+                  </div>
+                )}
                 {(debtClients?.length > 0) && (
                   <div>
                     <div style={{ padding:"8px 16px 4px",fontSize:10,fontWeight:700,color:"var(--color-text-faint)",letterSpacing:"0.08em",textTransform:"uppercase" }}>Deudas pendientes</div>

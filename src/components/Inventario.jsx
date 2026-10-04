@@ -11,6 +11,7 @@ import { SearchInput } from "./ui/SearchInput.jsx";
 import { KPI } from "./ui/KPI.jsx";
 import { Table } from "./ui/Table.jsx";
 import { Chip } from "./ui/Chip.jsx";
+import { SelectorProducto } from "./ui/SelectorProducto.jsx";
 
 const SIN_CATEGORIA = { id: DEFAULT_CATEGORY_ID, name: "Sin categoría" };
 // Agotado = sin stock (siempre). Stock bajo = por debajo del mínimo configurado.
@@ -86,7 +87,12 @@ export function Inventario({ D, A }) {
       </div>
       <div style={card()}>
         <Table cols={[
-          { key: "name", label: "Producto", style: { fontWeight: 500 } },
+          { key: "name", label: "Producto", style: { fontWeight: 500 }, render: (v, r) => (
+            <span style={{ display: "flex", alignItems: "center", gap: 8 }}>
+              {r.img ? <img src={r.img} alt="" loading="lazy" decoding="async" style={{ width: 32, height: 32, borderRadius: 6, objectFit: "cover", flexShrink: 0 }} />
+                : <span style={{ width: 32, height: 32, borderRadius: 6, background: "var(--color-bg-primary)", display: "inline-flex", alignItems: "center", justifyContent: "center", fontSize: 15, flexShrink: 0 }}>📦</span>}
+              {v}
+            </span>) },
           { key: "cat", label: "Categoría", render: v => getCategoryName(categoryOptions, v) },
           { key: "stock", label: "Stock", render: (v, r) => <strong style={{ color: r.level === "empty" ? C.red : r.level === "low" ? C.amber : C.green }}>{v} <span style={{ fontWeight: 400, fontSize: 11, color: C.textFaint }}>{r.unit}</span></strong> },
           { key: "cost", label: "Costo", render: v => (v > 0 ? Bs(v) : "—") },
@@ -128,16 +134,10 @@ export function Inventario({ D, A }) {
             </div>
           </div>
           <div style={{ marginBottom: 10 }}><label style={lbl}>Producto *</label>
-            <select style={inp} value={form.productId} onChange={e => setForm({ ...form, productId: e.target.value })}>
-              <option value="">Seleccionar producto...</option>
-              {categoryOptions.map(cat => {
-                const ps = products.filter(p => p.cat === cat.id);
-                return ps.length ? <optgroup key={cat.id} label={cat.name}>{ps.map(p => <option key={p.id} value={p.id}>{p.name} — Stock: {p.stock} {p.unit}</option>)}</optgroup> : null;
-              })}
-            </select>
+            <SelectorProducto products={products} categories={categoryOptions} value={form.productId} onChange={id => setForm(f => ({ ...f, productId: id }))} autoFocus={!form.productId} />
           </div>
           <div style={row()}>
-            <div style={{ flex: 1 }}><label style={lbl}>{form.type === "ajuste" ? "Stock contado *" : "Cantidad *"}</label><input type="number" min="0" step="any" inputMode="decimal" style={inp} value={form.qty} onChange={e => setForm({ ...form, qty: e.target.value })} placeholder="0" autoFocus /></div>
+            <div style={{ flex: 1 }}><label style={lbl}>{form.type === "ajuste" ? "Stock contado *" : "Cantidad *"}</label><input type="number" min="0" step="any" inputMode="decimal" style={inp} value={form.qty} onChange={e => setForm({ ...form, qty: e.target.value })} placeholder="0" autoFocus={!!form.productId} /></div>
             {form.type === "entrada" && <div style={{ flex: 1 }}><label style={lbl}>Costo unitario</label><input type="number" min="0" step="0.01" inputMode="decimal" style={inp} value={form.cost} onChange={e => setForm({ ...form, cost: e.target.value })} placeholder="Opcional" /></div>}
           </div>
           <div style={{ marginBottom: 10 }}><label style={lbl}>Notas</label><input style={inp} value={form.notes} onChange={e => setForm({ ...form, notes: e.target.value })} placeholder="Motivo del movimiento" /></div>

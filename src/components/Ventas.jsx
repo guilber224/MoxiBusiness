@@ -16,6 +16,7 @@ import { Empty } from "./ui/Empty.jsx";
 import { Header } from "./ui/Header.jsx";
 import { Table } from "./ui/Table.jsx";
 import { SearchInput } from "./ui/SearchInput.jsx";
+import { imprimirTicket, leerAnchoTicket, guardarAnchoTicket, leerAutoTicket, guardarAutoTicket } from "../utils/ticketTermico.js";
 import { Chip } from "./ui/Chip.jsx";
 
 const PM_LABELS = { efectivo: "💵 Efectivo", transferencia: "🏦 Transf.", banco: "🏦 Transf.", qr: "📱 QR", tarjeta: "💳 Tarjeta", mixto: "🔀 Mixto", credito: "🧾 Crédito" };
@@ -197,6 +198,11 @@ function ComprobanteModal({ sale, config, user, products, onClose }) {
   const businessName = safeBusinessName(config);
 
   const handlePDF = () => downloadSaleReceipt({ sale, config, user });
+  const [anchoTicket, setAnchoTicket] = useState(leerAnchoTicket);
+  const [autoTicket, setAutoTicket] = useState(leerAutoTicket);
+  const handleTicket = (ancho = anchoTicket) => imprimirTicket({ sale, config, ancho, simbolo: getCurrencySymbol(), vendedor: sale.nueva ? user?.name : "" });
+  // Venta recién hecha + "imprimir automáticamente" activado en este dispositivo
+  useEffect(() => { if (sale.nueva && leerAutoTicket()) handleTicket(); }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   const handlePrint = () => {
     const el = invoiceRef.current;
@@ -343,8 +349,11 @@ function ComprobanteModal({ sale, config, user, products, onClose }) {
           </div>
         </div>
 
-        <div style={{ display: "flex", gap: 8, padding: "14px 16px", borderTop: "1px solid var(--color-border)", background: "var(--color-bg-surface)", flexShrink: 0 }}>
+        <div style={{ display: "flex", gap: 8, padding: "14px 16px", borderTop: "1px solid var(--color-border)", background: "var(--color-bg-surface)", flexShrink: 0, flexWrap: "wrap", alignItems: "center" }}>
           <button onClick={onClose} style={{ ...mkBtn("ghost") }}>Cerrar</button>
+          <label title="Solo en este dispositivo" style={{ display: "flex", alignItems: "center", gap: 5, fontSize: 11.5, color: "var(--color-text-mid)", cursor: "pointer" }}>
+            <input type="checkbox" checked={autoTicket} onChange={e => { setAutoTicket(e.target.checked); guardarAutoTicket(e.target.checked); }} /> Imprimir ticket al vender
+          </label>
           <div style={{ flex: 1 }} />
           <a
             href={buildWhatsAppUrl({ sale, config, products })}
@@ -354,8 +363,17 @@ function ComprobanteModal({ sale, config, user, products, onClose }) {
           >
             <MessageCircle size={14} /> WhatsApp
           </a>
-          <button onClick={handlePrint} style={{ ...mkBtn("ghost"), display: "flex", alignItems: "center", gap: 6 }}>
-            <Printer size={14} /> Imprimir
+          <span style={{ display: "inline-flex", alignItems: "stretch" }}>
+            <button onClick={() => handleTicket()} title="Imprimir en impresora térmica" style={{ ...mkBtn("ghost"), display: "flex", alignItems: "center", gap: 6, borderTopRightRadius: 0, borderBottomRightRadius: 0 }}>
+              <Printer size={14} /> Ticket
+            </button>
+            <select aria-label="Ancho del papel" value={anchoTicket} onChange={e => { const a = Number(e.target.value); setAnchoTicket(a); guardarAnchoTicket(a); }}
+              style={{ border: "1px solid var(--color-border)", borderLeft: "none", borderRadius: "0 8px 8px 0", background: "transparent", color: "var(--color-text-mid)", fontSize: 12, padding: "0 4px", fontFamily: FONT }}>
+              <option value={80}>80 mm</option><option value={58}>58 mm</option>
+            </select>
+          </span>
+          <button onClick={handlePrint} title="Imprimir en hoja A4/carta" style={{ ...mkBtn("ghost"), display: "flex", alignItems: "center", gap: 6 }}>
+            <Printer size={14} /> A4
           </button>
           <button onClick={handlePDF} style={{ ...mkBtn("primary"), display: "flex", alignItems: "center", gap: 6 }}>
             <Download size={14} /> Descargar PDF
@@ -517,7 +535,7 @@ export function Ventas({ D, A, user, estado }) {
     if (!venta) return;
     setFeedback(`✓ Venta #${venta.numero} registrada${paidN > total ? ` · Vuelto: ${Bs(paidN - total)}` : ""}`); setTimeout(() => setFeedback(""), 5000);
     closeModal();
-    setComprobanteVenta(venta);
+    setComprobanteVenta({ ...venta, nueva: true, recibido: form.paymentMethod === "efectivo" ? paidN : 0, vuelto: form.paymentMethod === "efectivo" ? Math.max(0, paidN - total) : 0 });
   };
 
   const doPayment = async () => {
@@ -567,6 +585,7 @@ export function Ventas({ D, A, user, estado }) {
               {sale.paymentMethod && <span style={mkBadge(PM_COLORS[sale.paymentMethod] || "default")}>{PM_LABELS[sale.paymentMethod] || sale.paymentMethod}</span>}
               {sale.anulada ? <span style={mkBadge("red")}>ANULADA</span> : <span style={mkBadge(sale.debt > 0 ? "amber" : "green")}>{sale.debt > 0 ? "Pendiente" : "Saldado"}</span>}
               <button onClick={() => setComprobanteVenta(sale)} style={mkBtn("ghost")}>Comprobante</button>
+              <button onClick={() => imprimirTicket({ sale, config, ancho: leerAnchoTicket(), simbolo: getCurrencySymbol() })} style={mkBtn("ghost")}>🧾 Ticket</button>
               <button onClick={() => downloadSaleReceipt({ sale, config, user })} style={mkBtn("ghost")}>PDF</button>
               {canDeleteSales && !sale.anulada && <button onClick={() => { setErr(""); setMotivo(""); setDeleteTarget(sale); }} style={mkBtn("danger")}>Anular</button>}
             </div>

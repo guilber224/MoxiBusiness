@@ -16,6 +16,7 @@ import { SuscripcionVencida } from "./screens/SuscripcionVencida.jsx";
 import { suscripcionService } from "./services/suscripcionService.js";
 import { cobrosService, planIncluye } from "./services/cobrosService.js";
 import { PlanBloqueado } from "./components/PlanBloqueado.jsx";
+import { useAvisosCuenta } from "./hooks/useAvisosCuenta.js";
 import { useMoxiData } from "./data/useMoxiData.js";
 import { EstadoDatos } from "./components/ui/EstadoDatos.jsx";
 
@@ -103,6 +104,7 @@ export default function App() {
     suscripcionService.getOCrearTrial().then(setSuscripcion).catch(() => {});
     cobrosService.miPlan().then(setMiPlan).catch(() => {});
   }, []);
+  const { avisos: avisosCuenta, descartar: descartarAviso } = useAvisosCuenta({ user, suscripcion, onSuscripcionCambio: recargarSuscripcion });
   useEffect(() => {
     if (!user?.empresa_id || user?.role === "superadmin") return;
     suscripcionService.getOCrearTrial().then(s => { setSuscripcion(s); cobrosService.miPlan().then(setMiPlan).catch(() => {}); }).catch(() => {});
@@ -202,7 +204,7 @@ export default function App() {
           />
         )}
         <div style={{ display: "flex", flexDirection: "column", flex: 1, minWidth: 0, overflow: "hidden" }}>
-          <Topbar isMobile={isMobile} sidebarOpen={sidebarOpen} setSidebarOpen={setSidebarOpen} sidebarCollapsed={sidebarCollapsed} setSidebarCollapsed={setSidebarCollapsed} setTab={setTab} user={user} data={data} appDebtClients={appDebtClients} appLowStock={appLowStock} />
+          <Topbar isMobile={isMobile} sidebarOpen={sidebarOpen} setSidebarOpen={setSidebarOpen} sidebarCollapsed={sidebarCollapsed} setSidebarCollapsed={setSidebarCollapsed} setTab={setTab} user={user} data={data} appDebtClients={appDebtClients} appLowStock={appLowStock} avisos={avisosCuenta} onDescartarAviso={descartarAviso} />
 
           {user.role !== "superadmin" && suscripcion && !suscripcionService.estaVencida(suscripcion) && dias <= 7 && (
             <div style={{ background: "#92400e", borderBottom: "1px solid #b45309", padding: "8px 18px", display: "flex", alignItems: "center", gap: 10, fontSize: 13, color: "#fef3c7", flexShrink: 0, flexWrap: "wrap" }}>

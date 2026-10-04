@@ -6,7 +6,7 @@ import { BrandLogo } from "./ui/BrandLogo.jsx";
 import { ThemeToggle } from "./ThemeToggle.jsx";
 import { NotificacionesDropdown } from "./NotificacionesDropdown.jsx";
 
-export function Topbar({ isMobile, sidebarOpen, setSidebarOpen, sidebarCollapsed, setSidebarCollapsed, setTab, user, data, appDebtClients, appLowStock }) {
+export function Topbar({ isMobile, sidebarOpen, setSidebarOpen, sidebarCollapsed, setSidebarCollapsed, setTab, user, data, appDebtClients, appLowStock, avisos, onDescartarAviso }) {
   const [globalSearch, setGlobalSearch] = useState("");
   const [showResults, setShowResults] = useState(false);
   const searchRef = useRef(null);
@@ -89,7 +89,7 @@ export function Topbar({ isMobile, sidebarOpen, setSidebarOpen, sidebarCollapsed
       {/* Right actions */}
       <div style={{ display: "flex", alignItems: "center", gap: 8, flexShrink: 0 }}>
         <ThemeToggle />
-        <NotificacionesDropdown debtClients={appDebtClients} lowStock={appLowStock} setTab={setTab} />
+        <NotificacionesDropdown debtClients={appDebtClients} lowStock={appLowStock} setTab={setTab} avisos={avisos} onDescartar={onDescartarAviso} />
         <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "6px 10px", borderRadius: 10, background: "var(--color-bg-primary)", border: "1px solid var(--color-border)", flexShrink: 0 }}>
           <div style={{ width: 28, height: 28, background: data?.config?.logo_url ? "transparent" : "linear-gradient(135deg,#22C5FE,#111E7B)", borderRadius: data?.config?.logo_url ? 6 : "50%", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 12, color: "white", fontWeight: 700, flexShrink: 0, overflow: "hidden", border: data?.config?.logo_url ? "1px solid var(--color-border)" : "none" }}>
             {data?.config?.logo_url

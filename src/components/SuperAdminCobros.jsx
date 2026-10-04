@@ -36,7 +36,6 @@ export function SuperAdminCobros({ onCambio, user }) {
   useEffect(() => {
     const ch = supabase.channel("moxi_cobros_superadmin")
       .on("postgres_changes", { event: "INSERT", schema: "public", table: "solicitudes_pago" }, p => {
-        toast(`💳 Nuevo pago por revisar: ${p.new?.nombre_empresa || "empresa"} · ${bob(p.new?.monto)}`, { duration: 8000 });
         cargar();
       }).subscribe();
     return () => { supabase.removeChannel(ch); };
