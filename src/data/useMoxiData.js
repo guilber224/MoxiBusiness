@@ -9,7 +9,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { supabase } from "../lib/supabaseClient";
 import * as api from "./api.js";
-import { PRODUCTO_COLS, toProduct, toCustomer, toExpense, toSale, toPresentacion, toCita, toMesa, toMembresiaPlan, toMembresia, toAsistencia } from "./mappers.js";
+import { PRODUCTO_COLS, toProduct, toCustomer, toExpense, toSale, toPresentacion, toCita, toMesa, toMembresiaPlan, toMembresia, toAsistencia, toAnimal, toAnimalEvento } from "./mappers.js";
 import { recordLocalChange, reconcileWithServer, resetLocalChanges } from "../utils/localChanges.js";
 import { DEFAULT_CATEGORY_ID } from "../categories.js";
 
@@ -17,7 +17,7 @@ const CACHE_VERSION = "v2";
 const cacheKey = eid => `moxi_${CACHE_VERSION}_${eid}`;
 export const VACIO = {
   config: { businessName: "", currency: "BOB", logo_url: null, qr_url: null }, products: [], categories: [], customers: [], sales: [], expenses: [], movements: [],
-  pedidos: [], suppliers: [], purchases: [], formulas: [], orders: [], users: [], activityLogs: [], caja: null, lotes: [], presentaciones: [], servicios: [], citas: [], mesas: [], comandas: [], membresiaPlanes: [], membresias: [], asistencias: [],
+  pedidos: [], suppliers: [], purchases: [], formulas: [], orders: [], users: [], activityLogs: [], caja: null, lotes: [], presentaciones: [], servicios: [], citas: [], mesas: [], comandas: [], membresiaPlanes: [], membresias: [], asistencias: [], animales: [], pendientesHato: [],
 };
 const leerCache = eid => { try { const v = JSON.parse(localStorage.getItem(cacheKey(eid))); return v && typeof v === "object" ? { ...VACIO, ...v } : null; } catch { return null; } };
 const escribirCache = (eid, data) => { try { localStorage.setItem(cacheKey(eid), JSON.stringify(data)); } catch { /* cuota llena: la app sigue funcionando sin caché */ } };
@@ -163,6 +163,15 @@ export function useMoxiData(user) {
       })
       .on("postgres_changes", { event: "*", schema: "public", table: "ordenes_servicio", filter: f }, p => {
         if (p.new?.id) api.servicios.obtener(p.new.id).then(o => mutar("servicios", os => porId(os, o))).catch(() => {});
+      })
+      .on("postgres_changes", { event: "*", schema: "public", table: "animales", filter: f }, p => {
+        if (p.eventType === "DELETE") mutar("animales", as => sinId(as, p.old?.id));
+        else if (p.new?.id) mutar("animales", as => porId(as, toAnimal(p.new)));
+      })
+      .on("postgres_changes", { event: "*", schema: "public", table: "animal_eventos", filter: f }, p => {
+        const e = p.new?.id ? toAnimalEvento(p.new) : null;
+        if (e && e.proximaFecha && !e.proximaCumplida) mutar("pendientesHato", ps => porId(ps, e));
+        else mutar("pendientesHato", ps => sinId(ps, p.new?.id || p.old?.id));
       })
       .on("postgres_changes", { event: "*", schema: "public", table: "membresia_planes", filter: f }, p => {
         if (p.eventType === "DELETE" || p.new?.activo === false) mutar("membresiaPlanes", ps => sinId(ps, p.old?.id || p.new?.id));
@@ -320,6 +329,34 @@ export function useMoxiData(user) {
       },
       cancelarServicio: async (id, motivo, devolver) => { const r = await api.servicios.cancelar(id, motivo, devolver); mutar("servicios", os => porId(os, r)); refrescarCaja(); return r; },
       eventosServicio: id => api.servicios.eventos(id),
+      // Hato
+      guardarAnimal: async a => { const r = await api.animales.guardar(a); mutar("animales", as => porId(as, r)); if (a.registrarGasto) refrescarCaja(); return r; },
+      eventoAnimal: async (id, e) => {
+        const r = await api.animales.evento(id, e);
+        const ids = [id, r.criaId].filter(Boolean);
+        const frescos = await Promise.all(ids.map(x => api.animales.obtener(x)));
+        mutar("animales", as => frescos.reduce((acc, a) => porId(acc, a), as));
+        api.animales.pendientes().then(ps => setData(d => ({ ...d, pendientesHato: ps }))).catch(() => {});
+        return r;
+      },
+      eventoMasivo: async (items, e) => {
+        const r = await api.animales.eventoMasivo(items, e);
+        const [as, ps] = await Promise.all([api.animales.listar(), api.animales.pendientes()]);
+        setData(d => ({ ...d, animales: as, pendientesHato: ps }));
+        return r;
+      },
+      eliminarEventoAnimal: async (animalId, eventoId) => { await api.animales.eliminarEvento(eventoId); const a = await api.animales.obtener(animalId); mutar("animales", as => porId(as, a)); },
+      venderAnimales: async v => {
+        const r = await api.animales.vender(v);
+        const as = await api.animales.listar(); setData(d => ({ ...d, animales: as }));
+        let sale = null;
+        if (r.venta?.id) { sale = await api.ventas.obtener(r.venta.id); if (sale?.id) mutar("sales", ss => porId(ss, sale)); refrescarCaja(); }
+        return { ...r, sale };
+      },
+      bajaAnimales: async (ids, tipo, fecha, motivo) => { const n = await api.animales.baja(ids, tipo, fecha, motivo); const as = await api.animales.listar(); setData(d => ({ ...d, animales: as })); return n; },
+      reactivarAnimal: async id => { const r = await api.animales.reactivar(id); mutar("animales", as => porId(as, r)); return r; },
+      eventosDeAnimal: id => api.animales.eventos(id),
+      criasDeAnimal: id => api.animales.crias(id),
       // Membresías
       guardarPlanMembresia: async p => { const r = await api.membresias.guardarPlan(p); mutar("membresiaPlanes", ps => porId(ps, r).sort((a, b) => a.orden - b.orden)); return r; },
       eliminarPlanMembresia: async id => { await api.membresias.eliminarPlan(id); mutar("membresiaPlanes", ps => sinId(ps, id)); },

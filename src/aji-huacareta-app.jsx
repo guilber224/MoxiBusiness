@@ -44,6 +44,7 @@ const Productos = lazyWithReload(() => import("./components/Productos.jsx").then
 const Inventario = lazyWithReload(() => import("./components/Inventario.jsx").then(m => ({ default: m.Inventario })));
 const Ventas = lazyWithReload(() => import("./components/Ventas.jsx").then(m => ({ default: m.Ventas })));
 const Pedidos = lazyWithReload(() => import("./components/Pedidos.jsx").then(m => ({ default: m.Pedidos })));
+const Hato = lazyWithReload(() => import("./components/Hato.jsx").then(m => ({ default: m.Hato })));
 const Membresias = lazyWithReload(() => import("./components/Membresias.jsx").then(m => ({ default: m.Membresias })));
 const Mesas = lazyWithReload(() => import("./components/Mesas.jsx").then(m => ({ default: m.Mesas })));
 const Agenda = lazyWithReload(() => import("./components/Agenda.jsx").then(m => ({ default: m.Agenda })));
@@ -192,6 +193,17 @@ export default function App() {
     porCliente.forEach(lista => { const hasta = cubiertoHasta(lista, hoy); if (hasta && hasta <= limite) n++; });
     return n ? [{ id: `membresias-${hoy}-${n}`, tipo: "warn", titulo: `${n} membresía${n === 1 ? "" : "s"} por vencer`, texto: "Vencen en 3 días o menos y aún no renovaron", tab: "membresias" }] : [];
   }, [data.membresias]);
+  // Hato: vacunas/tratamientos que tocan esta semana (o atrasados) y partos de los próximos 7 días
+  const avisosHato = useMemo(() => {
+    const hoy = today(), limite = sumarDias(hoy, 7);
+    const vivos = new Set((data.animales || []).filter(a => a.estado === "ACTIVO").map(a => a.id));
+    const pend = (data.pendientesHato || []).filter(e => vivos.has(e.animalId) && e.proximaFecha <= limite).length;
+    const partos = (data.animales || []).filter(a => a.estado === "ACTIVO" && a.fechaPartoEst && a.fechaPartoEst <= limite && a.fechaPartoEst >= sumarDias(hoy, -15)).length;
+    const lista = [];
+    if (pend) lista.push({ id: `hato-sanidad-${hoy}-${pend}`, tipo: "warn", titulo: `${pend} tarea${pend === 1 ? "" : "s"} sanitaria${pend === 1 ? "" : "s"} esta semana`, texto: "Vacunas, desparasitaciones o tratamientos programados", tab: "hato" });
+    if (partos) lista.push({ id: `hato-partos-${hoy}-${partos}`, tipo: "info", titulo: `${partos} parto${partos === 1 ? "" : "s"} esperado${partos === 1 ? "" : "s"} esta semana`, texto: "Revisa Hato → Reproducción", tab: "hato" });
+    return lista;
+  }, [data.animales, data.pendientesHato]);
   const appLowStock = useMemo(() => data.products.filter(p => !p.isGroup && p.minStock > 0 && p.stock <= p.minStock), [data.products]);
 
   const loadingScreen = (
@@ -236,7 +248,7 @@ export default function App() {
           />
         )}
         <div style={{ display: "flex", flexDirection: "column", flex: 1, minWidth: 0, overflow: "hidden" }}>
-          <Topbar isMobile={isMobile} sidebarOpen={sidebarOpen} setSidebarOpen={setSidebarOpen} sidebarCollapsed={sidebarCollapsed} setSidebarCollapsed={setSidebarCollapsed} setTab={setTab} user={user} data={data} appDebtClients={appDebtClients} appLowStock={appLowStock} avisos={[...avisosCuenta, ...avisosLotes, ...avisosAgenda, ...avisosMembresias]} onDescartarAviso={descartarAviso} />
+          <Topbar isMobile={isMobile} sidebarOpen={sidebarOpen} setSidebarOpen={setSidebarOpen} sidebarCollapsed={sidebarCollapsed} setSidebarCollapsed={setSidebarCollapsed} setTab={setTab} user={user} data={data} appDebtClients={appDebtClients} appLowStock={appLowStock} avisos={[...avisosCuenta, ...avisosLotes, ...avisosAgenda, ...avisosMembresias, ...avisosHato]} onDescartarAviso={descartarAviso} />
 
           {user.role !== "superadmin" && suscripcion && !suscripcionService.estaVencida(suscripcion) && dias <= 7 && (
             <div style={{ background: "#92400e", borderBottom: "1px solid #b45309", padding: "8px 18px", display: "flex", alignItems: "center", gap: 10, fontSize: 13, color: "#fef3c7", flexShrink: 0, flexWrap: "wrap" }}>
@@ -263,6 +275,7 @@ export default function App() {
                 {seccion("agenda", <Agenda {...props} />)}
                 {seccion("mesas", <Mesas {...props} />)}
                 {seccion("membresias", <Membresias {...props} />)}
+                {seccion("hato", <Hato {...props} />)}
                 {seccion("deudas", <Deudas {...props} />)}
                 {seccion("productos", <Productos {...props} />)}
                 {seccion("inventario", <Inventario {...props} />)}

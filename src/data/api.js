@@ -3,7 +3,7 @@
 // mensaje en español listo para mostrar al usuario.
 import { supabase } from "../lib/supabaseClient";
 import {
-  PRODUCTO_COLS, LOTE_COLS, toLote, toOrdenServicio, toCita, toMesa, toComanda, COMANDA_SELECT, toMembresiaPlan, toMembresia, toAsistencia, PRESENTACION_COLS, toPresentacion, CLIENTE_COLS, VENTA_SELECT, GASTO_COLS, MOV_COLS, COMPRA_SELECT, EMPRESA_COLS,
+  PRODUCTO_COLS, LOTE_COLS, toLote, toOrdenServicio, toCita, toMesa, toComanda, COMANDA_SELECT, toMembresiaPlan, toMembresia, toAsistencia, toAnimal, toAnimalEvento, PRESENTACION_COLS, toPresentacion, CLIENTE_COLS, VENTA_SELECT, GASTO_COLS, MOV_COLS, COMPRA_SELECT, EMPRESA_COLS,
   toProduct, toCategory, toCustomer, toSale, toExpense, toMovement, toSupplier, toPurchase,
   toFormula, toOrder, toConfig, toUser, toActivity,
   fromProduct, fromCustomer, fromExpense, fromSupplier, fromFormula, fromConfig,
@@ -66,6 +66,9 @@ export async function cargarTodo(empresaId) {
     servicios:  supabase.from("ordenes_servicio").select("*").or(`estado.not.in.(ENTREGADO,CANCELADO),created_at.gte."${desdeMeses(12)}"`).order("created_at", { ascending: false }).limit(1000),
     // Citas de los últimos 2 meses y todas las futuras (las más antiguas se piden al navegar)
     citas:      todasLasFilas(t => supabase.from("citas").select("*", t ? { count: "exact" } : undefined).gte("inicio", desdeMeses(2)).order("inicio").order("id")),
+    // Hato: los animales activos y las bajas del último año (para los indicadores)
+    animales:   todasLasFilas(t => supabase.from("animales").select("*", t ? { count: "exact" } : undefined).or(`estado.eq.ACTIVO,fecha_baja.gte.${desdeMeses(12).slice(0, 10)}`).order("codigo").order("id")),
+    pendientesHato: supabase.from("animal_eventos").select("*").not("proxima_fecha", "is", null).eq("proxima_cumplida", false).order("proxima_fecha").limit(3000),
     membresiaPlanes: supabase.from("membresia_planes").select("*").eq("activo", true).order("orden").limit(200),
     // Membresías vigentes, futuras, congeladas y las vencidas de los últimos 3 meses (para renovar)
     membresias: todasLasFilas(t => supabase.from("membresias").select("*", t ? { count: "exact" } : undefined).or(`fin.gte.${desdeMeses(3).slice(0, 10)},estado.eq.CONGELADA`).order("fin", { ascending: false }).order("id")),
@@ -80,7 +83,7 @@ export async function cargarTodo(empresaId) {
     customers: rs => rs.map(toCustomer), sales: rs => rs.map(toSale), expenses: rs => rs.map(toExpense),
     movements: rs => rs.map(toMovement), pedidos: rs => rs, suppliers: rs => rs.map(toSupplier),
     purchases: rs => rs.map(toPurchase), formulas: rs => rs.map(toFormula), orders: rs => rs.map(toOrder),
-    users: rs => rs.map(toUser), activityLogs: rs => rs.map(toActivity), caja: r => r || null, lotes: rs => rs.map(toLote), servicios: rs => rs.map(toOrdenServicio), citas: rs => rs.map(toCita), mesas: rs => rs.map(toMesa), membresiaPlanes: rs => rs.map(toMembresiaPlan), membresias: rs => rs.map(toMembresia), asistencias: rs => rs.map(toAsistencia), comandas: rs => rs.map(toComanda), presentaciones: rs => rs.map(toPresentacion),
+    users: rs => rs.map(toUser), activityLogs: rs => rs.map(toActivity), caja: r => r || null, lotes: rs => rs.map(toLote), servicios: rs => rs.map(toOrdenServicio), citas: rs => rs.map(toCita), mesas: rs => rs.map(toMesa), membresiaPlanes: rs => rs.map(toMembresiaPlan), animales: rs => rs.map(toAnimal), pendientesHato: rs => rs.map(toAnimalEvento), membresias: rs => rs.map(toMembresia), asistencias: rs => rs.map(toAsistencia), comandas: rs => rs.map(toComanda), presentaciones: rs => rs.map(toPresentacion),
   };
   const keys = Object.keys(q);
   const results = await Promise.allSettled(keys.map(k => q[k]));
@@ -198,6 +201,38 @@ export const servicios = {
   async estado(id, estado, nota) { return toOrdenServicio(await rpc("servicio_estado", { p_id: id, p_estado: estado, p_nota: nota || null })); },
   async entregar(id, pagos) { const r = await rpc("servicio_entregar", { p_id: id, p_pagos: (pagos || []).map(x => ({ monto: Number(x.amount), metodo: x.method })) }); return { orden: toOrdenServicio(r), venta: r.venta || null }; },
   async cancelar(id, motivo, devolver) { return toOrdenServicio(await rpc("servicio_cancelar", { p_id: id, p_motivo: motivo, p_devolver_anticipo: !!devolver })); },
+};
+
+// Hato: todas las escrituras pasan por funciones del servidor
+const animalP = a => ({
+  id: a.id || null, codigo: a.codigo, nombre: a.nombre, especie: a.especie, sexo: a.sexo, castrado: !!a.castrado, raza: a.raza, color: a.color, marca: a.marca,
+  categoria: a.categoria || null, fecha_nacimiento: a.fechaNacimiento || null, origen: a.origen, fecha_ingreso: a.fechaIngreso || null,
+  precio_compra: a.precioCompra === "" || a.precioCompra == null ? null : Number(a.precioCompra), madre_id: a.madreId || null, padre_id: a.padreId || null,
+  padre_texto: a.padreTexto, potrero: a.potrero, peso: a.peso === "" || a.peso == null ? null : Number(a.peso), notas: a.notas,
+  registrar_gasto: !!a.registrarGasto, metodo_pago: a.metodoPago || "efectivo",
+});
+const eventoP = e => ({
+  tipo: e.tipo, fecha: e.fecha || null, valor: e.valor === "" || e.valor == null ? null : Number(e.valor), detalle: e.detalle || null,
+  resultado: e.resultado || null, proxima_fecha: e.proximaFecha || null,
+  cria: e.cria ? { codigo: e.cria.codigo, nombre: e.cria.nombre, sexo: e.cria.sexo, color: e.cria.color, peso: e.cria.peso === "" ? null : e.cria.peso,
+    padre_id: e.cria.padreId || null, padre_texto: e.cria.padreTexto || null } : null,
+});
+export const animales = {
+  async listar() { return ok(await todasLasFilas(t => supabase.from("animales").select("*", t ? { count: "exact" } : undefined).or(`estado.eq.ACTIVO,fecha_baja.gte.${desdeMeses(12).slice(0, 10)}`).order("codigo").order("id"))).map(toAnimal); },
+  async obtener(id) { return toAnimal(ok(await supabase.from("animales").select("*").eq("id", id).single())); },
+  async crias(madreId) { return ok(await supabase.from("animales").select("*").eq("madre_id", madreId).order("fecha_nacimiento", { ascending: false }).limit(100)).map(toAnimal); },
+  async eventos(id) { return ok(await supabase.from("animal_eventos").select("*").eq("animal_id", id).order("fecha", { ascending: false }).order("created_at", { ascending: false }).limit(500)).map(toAnimalEvento); },
+  async pendientes() { return ok(await supabase.from("animal_eventos").select("*").not("proxima_fecha", "is", null).eq("proxima_cumplida", false).order("proxima_fecha").limit(3000)).map(toAnimalEvento); },
+  async guardar(a) { return toAnimal(await rpc("animal_guardar", { p: animalP(a) })); },
+  async evento(id, e) { return toAnimalEvento(await rpc("animal_evento", { p_animal: id, p: eventoP(e) })); },
+  async eventoMasivo(items, e) { return rpc("animal_evento_masivo", { p_items: items.map(i => (i.valor === "" || i.valor == null ? { animal_id: i.id } : { animal_id: i.id, valor: Number(i.valor) })), p: eventoP(e) }); },
+  async eliminarEvento(id) { await rpc("animal_evento_eliminar", { p_id: id }); },
+  async vender(v) {
+    return rpc("animal_vender", { p: { items: v.items.map(i => ({ animal_id: i.id, precio: Number(i.precio) })), cliente_id: v.customerId || null,
+      cliente_nombre: v.customerName || null, notas: v.notas || null, pagos: (v.pagos || []).filter(x => Number(x.amount) > 0).map(x => ({ monto: Number(x.amount), metodo: x.method })) } });
+  },
+  baja: (ids, tipo, fecha, motivo) => rpc("animal_baja", { p_ids: ids, p_tipo: tipo, p_fecha: fecha || null, p_motivo: motivo || null }),
+  async reactivar(id) { return toAnimal(await rpc("animal_reactivar", { p_id: id })); },
 };
 
 // Membresías: todas las escrituras pasan por funciones del servidor

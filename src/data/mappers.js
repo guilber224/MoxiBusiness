@@ -66,6 +66,23 @@ export const toOrdenServicio = r => ({
   garantiaDias: r.garantia_dias ?? null, notas: r.notas || "", ventaId: r.venta_id || null, usuario: r.usuario_nombre || "",
 });
 
+// ── Hato ganadero ──────────────────────────────────────────────────────────
+export const toAnimal = r => ({
+  id: r.id, codigo: r.codigo, nombre: r.nombre || "", especie: r.especie, sexo: r.sexo, castrado: !!r.castrado, raza: r.raza || "", color: r.color || "",
+  marca: r.marca || "", categoria: r.categoria || null, fechaNacimiento: r.fecha_nacimiento || null, origen: r.origen, fechaIngreso: r.fecha_ingreso,
+  precioCompra: r.precio_compra == null ? null : num(r.precio_compra), madreId: r.madre_id || null, padreId: r.padre_id || null, padreTexto: r.padre_texto || "",
+  potrero: r.potrero || "", peso: r.peso_actual == null ? null : num(r.peso_actual), fechaPeso: r.fecha_peso || null,
+  pesoAnterior: r.peso_anterior == null ? null : num(r.peso_anterior), fechaPesoAnterior: r.fecha_peso_anterior || null,
+  prenada: !!r.prenada, fechaPartoEst: r.fecha_parto_est || null, ultimoParto: r.ultimo_parto || null, partos: r.partos || 0,
+  estado: r.estado, fechaBaja: r.fecha_baja || null, motivoBaja: r.motivo_baja || "", precioVenta: r.precio_venta == null ? null : num(r.precio_venta),
+  ventaId: r.venta_id || null, notas: r.notas || "",
+});
+export const toAnimalEvento = r => ({
+  id: r.id, animalId: r.animal_id, tipo: r.tipo, fecha: r.fecha, valor: r.valor == null ? null : num(r.valor), detalle: r.detalle || "",
+  resultado: r.resultado || "", proximaFecha: r.proxima_fecha || null, proximaCumplida: !!r.proxima_cumplida, criaId: r.cria_id || null,
+  usuario: r.usuario_nombre || "", createdAt: r.created_at,
+});
+
 // ── Membresías ─────────────────────────────────────────────────────────────
 export const toMembresiaPlan = r => ({
   id: r.id, name: r.nombre, price: num(r.precio), duracionValor: r.duracion_valor, duracionUnidad: r.duracion_unidad,
