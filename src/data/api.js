@@ -201,7 +201,14 @@ export const pedidos = {
 };
 
 // ── Empresa ────────────────────────────────────────────────────────────────
+// Importación masiva desde Excel (todo o nada, con errores por fila)
+export const importar = {
+  async productos(filas, actualizar = false) { return ok(await supabase.rpc("productos_importar", { p_filas: filas, p_actualizar: actualizar })); },
+  async clientes(filas, actualizar = false) { return ok(await supabase.rpc("clientes_importar", { p_filas: filas, p_actualizar: actualizar })); },
+};
+
 export const empresa = {
+  async onboarding(completado = true) { ok(await supabase.rpc("empresa_onboarding", { p_completado: completado })); },
   async actualizar(empresaId, config) {
     const cambios = Object.fromEntries(Object.entries(fromConfig(config)).filter(([, v]) => v !== undefined));
     return toConfig(ok(await supabase.from("empresas").update(cambios).eq("id", empresaId).select(EMPRESA_COLS).single()));

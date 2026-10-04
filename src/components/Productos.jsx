@@ -11,6 +11,7 @@ import { Header } from "./ui/Header.jsx";
 import { Empty } from "./ui/Empty.jsx";
 import { Modal } from "./ui/Modal.jsx";
 import { SearchInput } from "./ui/SearchInput.jsx";
+import { ImportarExcel } from "./ImportarExcel.jsx";
 
 const SIN_CATEGORIA = { id: DEFAULT_CATEGORY_ID, name: "Sin categoría", locked: true };
 const FORM_VACIO = { name: "", cat: DEFAULT_CATEGORY_ID, unit: "", price: "", cost: "", minStock: "", desc: "", img: null, barcode: "" };
@@ -87,10 +88,15 @@ export function Productos({ D, A, user }) {
 
   const margen = n(form.price) > 0 && n(form.cost) > 0 ? Math.round((n(form.price) - n(form.cost)) / n(form.price) * 100) : null;
   const admin = isAdmin(user) || user?.role === "superadmin";
+  const [importando, setImportando] = useState(false);
 
   return (
     <div>
-      <Header title="Productos" sub={`${products.length} producto${products.length !== 1 ? "s" : ""} en el catálogo`} action={<button onClick={() => openForm()} style={mkBtn("primary")}>+ Nuevo producto</button>} />
+      <Header title="Productos" sub={`${products.length} producto${products.length !== 1 ? "s" : ""} en el catálogo`} action={<>
+        {admin && <button onClick={() => setImportando(true)} style={mkBtn("ghost")}>📥 Importar Excel</button>}
+        <button onClick={() => openForm()} style={mkBtn("primary")}>+ Nuevo producto</button>
+      </>} />
+      {importando && <ImportarExcel tipo="productos" A={A} onClose={() => setImportando(false)} />}
       <div style={{ display: "flex", gap: 8, marginBottom: 14, flexWrap: "wrap" }}>
         <SearchInput value={q} onChange={setQ} placeholder="Buscar por nombre o código..." />
         <div style={{ display: "flex", gap: 3, flexWrap: "wrap" }}>

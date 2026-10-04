@@ -244,6 +244,10 @@ export function useMoxiData(user) {
       // Empresa
       actualizarConfig: async cambios => { const r = await api.empresa.actualizar(E(), cambios); setData(d => ({ ...d, config: r })); return r; },
       subirArchivoEmpresa: (file, nombre) => api.empresa.subirArchivo(file, E(), nombre),
+      // Importar productos o clientes desde Excel; luego se recarga todo para traer categorías y kardex
+      importarProductos: async (filas, actualizar) => { const r = await api.importar.productos(filas, actualizar); await cargar(); return r; },
+      importarClientes: async (filas, actualizar) => { const r = await api.importar.clientes(filas, actualizar); await cargar(); return r; },
+      completarOnboarding: async (completado = true) => { await api.empresa.onboarding(completado); setData(d => ({ ...d, config: { ...d.config, onboardingCompletado: completado } })); },
       setUsuarios: users => setData(d => ({ ...d, users })),
     };
   }, [cargar, mutar, refrescarProductos, refrescarCaja, refrescarKardex, user?.id, user?.name]);

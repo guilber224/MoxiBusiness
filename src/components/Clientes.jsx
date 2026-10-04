@@ -11,11 +11,14 @@ import { Modal } from "./ui/Modal.jsx";
 import { Table } from "./ui/Table.jsx";
 import { SearchInput } from "./ui/SearchInput.jsx";
 import { KPI } from "./ui/KPI.jsx";
+import { ImportarExcel } from "./ImportarExcel.jsx";
 
 // ╔══════════════════════════════════════════════════════════════════════╗
 // ║  CLIENTES                                                           ║
 // ╚══════════════════════════════════════════════════════════════════════╝
-export function Clientes({ D, A }) {
+export function Clientes({ D, A, user }) {
+  const [importando, setImportando] = useState(false);
+  const admin = user?.role === "admin" || user?.role === "superadmin";
   const { customers } = D;
   // Las ventas anuladas no cuentan como compras ni como deuda
   const sales = D.sales.filter(s => !s.anulada);
@@ -102,9 +105,11 @@ export function Clientes({ D, A }) {
   return (
     <div>
       <Header title="Clientes" sub={`${customers.length} clientes registrados`} action={<>
+        {admin && <button onClick={() => setImportando(true)} style={mkBtn("ghost")}>📥 Importar Excel</button>}
         <button onClick={exportXLS} style={mkBtn("ghost")}>⬇️ Exportar Excel</button>
         <button onClick={()=>openForm()} style={mkBtn("primary")}>+ Nuevo cliente</button>
       </>}/>
+      {importando && <ImportarExcel tipo="clientes" A={A} onClose={() => setImportando(false)} />}
       <div style={{display:"flex",gap:8,marginBottom:14}}>
         <SearchInput value={q} onChange={setQ} placeholder="Buscar por nombre, mercado, teléfono o CI..."/>
       </div>

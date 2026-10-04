@@ -202,7 +202,7 @@ export const toOrder = r => ({
 });
 
 // ── Empresa (configuración) ────────────────────────────────────────────────
-export const EMPRESA_COLS = "id,nombre,logo_url,qr_url,telefono,direccion,nit,email,rubro,moneda,timezone,plan";
+export const EMPRESA_COLS = "id,nombre,logo_url,qr_url,telefono,direccion,nit,email,rubro,moneda,timezone,plan,onboarding_completado_at";
 export const toConfig = r => ({
   empresaId: r.id,
   businessName: r.nombre || "",
@@ -216,6 +216,7 @@ export const toConfig = r => ({
   rubro: r.rubro || "",
   timezone: r.timezone || "America/La_Paz",
   plan: r.plan || "FREE",
+  onboardingCompletado: !!r.onboarding_completado_at,
 });
 export const fromConfig = c => ({
   nombre: (c.businessName || "").trim() || undefined,

@@ -47,6 +47,7 @@ const Caja = lazyWithReload(() => import("./components/Caja.jsx").then(m => ({ d
 const Analisis = lazyWithReload(() => import("./components/Analisis.jsx").then(m => ({ default: m.Analisis })));
 const Exportar = lazyWithReload(() => import("./components/Exportar.jsx").then(m => ({ default: m.Exportar })));
 const UsuariosAdmin = lazyWithReload(() => import("./components/UsuariosAdmin.jsx").then(m => ({ default: m.UsuariosAdmin })));
+const AsistenteInicio = lazyWithReload(() => import("./components/AsistenteInicio.jsx").then(m => ({ default: m.AsistenteInicio })));
 const SuperAdminPanel = lazyWithReload(() => import("./components/SuperAdminPanel.jsx").then(m => ({ default: m.SuperAdminPanel })));
 const ResetPasswordScreen = lazyWithReload(() => import("./screens/ResetPasswordScreen.jsx").then(m => ({ default: m.ResetPasswordScreen })));
 
@@ -68,7 +69,8 @@ export default function App() {
   const [sessionChecked, setSessionChecked] = useState(false);
   const [isRestoringSession, setIsRestoringSession] = useState(false);
   const [suscripcion, setSuscripcion] = useState(null);
-  const [miPlan, setMiPlan] = useState(null); // módulos y límite de usuarios del plan (servidor)
+  const [miPlan, setMiPlan] = useState(null);
+  const [asistenteCerrado, setAsistenteCerrado] = useState(false); // módulos y límite de usuarios del plan (servidor)
   const [waConfig, setWaConfig] = useState("+59163506018");
   // Una vez visitada, cada sección queda montada (oculta): volver a ella es instantáneo.
   const [mountedTabs, setMountedTabs] = useState(() => new Set(["dashboard"]));
@@ -144,6 +146,8 @@ export default function App() {
   const allowedTabs = useMemo(() => ROLES[user?.role] || [], [user?.role]);
   // Secciones que el rol permite pero el plan no incluye: se ven con candado
   const bloqueados = useMemo(() => (user?.role === "superadmin" ? [] : allowedTabs.filter(t => !planIncluye(miPlan, t))), [allowedTabs, miPlan, user?.role]);
+  // Si el administrador vuelve a abrir el asistente desde Ajustes, se muestra otra vez
+  useEffect(() => { if (data.config?.onboardingCompletado === false) setAsistenteCerrado(false); }, [data.config?.onboardingCompletado]);
   useEffect(() => {
     if (user && allowedTabs.length && !allowedTabs.includes(tab)) setTab(allowedTabs[0]);
   }, [user, tab, allowedTabs]);
@@ -237,6 +241,10 @@ export default function App() {
           </main>
 
           {isMobile && <BottomNav tab={tab} setTab={setTab} user={user} />}
+          {/* Asistente de inicio: solo el administrador de una empresa nueva, hasta que lo termine u omita */}
+          {(user.role === "admin" || user.role === "superadmin") && data.config?.onboardingCompletado === false && !asistenteCerrado && (
+            <Suspense fallback={null}><AsistenteInicio D={data} A={acciones} user={user} setTab={setTab} onCerrar={() => setAsistenteCerrado(true)} /></Suspense>
+          )}
         </div>
       </div>
     </ThemeProvider>

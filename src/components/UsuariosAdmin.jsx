@@ -24,7 +24,7 @@ const ROL_TXT = Object.fromEntries(ROLES.map(r => [r.id, r.label]));
 const FORM_VACIO = { name: "", email: "", password: "", confirm: "", role: "vendedor" };
 
 // Imagen de la empresa (logo o QR de cobro) en Supabase Storage
-function ImagenEmpresa({ titulo, ayuda, url, nombre, campo, A, puedeEditar }) {
+export function ImagenEmpresa({ titulo, ayuda, url, nombre, campo, A, puedeEditar }) {
   const [ejecutar, subiendo] = useAccion();
   const fileRef = useRef(null);
   const subir = async file => {
@@ -180,7 +180,10 @@ export function UsuariosAdmin({ D, A, user, onProfileUpdate, suscripcion, onSusc
         </div>
         {admin && <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
           <div style={{ fontSize: 12, color: C.textFaint }}>Aparecen en las notas de venta y cotizaciones. Formato de moneda: <strong style={{ color: C.text }}>{formatCurrency(1234.5)}</strong></div>
-          <button onClick={saveEmpresa} disabled={guardando} style={mkBtn("primary")}>{guardando ? "Guardando…" : "Guardar empresa"}</button>
+          <div style={{ display: "flex", gap: 8 }}>
+            {admin && config.onboardingCompletado && <button onClick={() => ejecutar(() => A.completarOnboarding(false))} style={mkBtn("ghost")}>🧭 Asistente de inicio</button>}
+            <button onClick={saveEmpresa} disabled={guardando} style={mkBtn("primary")}>{guardando ? "Guardando…" : "Guardar empresa"}</button>
+          </div>
         </div>}
       </div>
 
