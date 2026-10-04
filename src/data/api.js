@@ -3,7 +3,7 @@
 // mensaje en español listo para mostrar al usuario.
 import { supabase } from "../lib/supabaseClient";
 import {
-  PRODUCTO_COLS, LOTE_COLS, toLote, CLIENTE_COLS, VENTA_SELECT, GASTO_COLS, MOV_COLS, COMPRA_SELECT, EMPRESA_COLS,
+  PRODUCTO_COLS, LOTE_COLS, toLote, PRESENTACION_COLS, toPresentacion, CLIENTE_COLS, VENTA_SELECT, GASTO_COLS, MOV_COLS, COMPRA_SELECT, EMPRESA_COLS,
   toProduct, toCategory, toCustomer, toSale, toExpense, toMovement, toSupplier, toPurchase,
   toFormula, toOrder, toConfig, toUser, toActivity,
   fromProduct, fromCustomer, fromExpense, fromSupplier, fromFormula, fromConfig,
@@ -60,6 +60,7 @@ export async function cargarTodo(empresaId) {
     users:      supabase.from("usuarios").select("id,nombre,email,role,activo,created_at").order("nombre"),
     activityLogs: supabase.from("activity_logs").select("id,usuario_id,usuario_nombre,accion,detalle,created_at").order("created_at", { ascending: false }).limit(200),
     caja:       supabase.rpc("caja_resumen"),
+    presentaciones: todasLasFilas(t => supabase.from("producto_presentaciones").select(PRESENTACION_COLS, t ? { count: "exact" } : undefined).eq("activo", true).order("orden").order("id")),
     lotes:      todasLasFilas(t => supabase.from("lotes").select(LOTE_COLS, t ? { count: "exact" } : undefined).gt("cantidad", 0).order("vencimiento", { ascending: true, nullsFirst: false }).order("id")),
   };
   const mapeo = {
@@ -67,7 +68,7 @@ export async function cargarTodo(empresaId) {
     customers: rs => rs.map(toCustomer), sales: rs => rs.map(toSale), expenses: rs => rs.map(toExpense),
     movements: rs => rs.map(toMovement), pedidos: rs => rs, suppliers: rs => rs.map(toSupplier),
     purchases: rs => rs.map(toPurchase), formulas: rs => rs.map(toFormula), orders: rs => rs.map(toOrder),
-    users: rs => rs.map(toUser), activityLogs: rs => rs.map(toActivity), caja: r => r || null, lotes: rs => rs.map(toLote),
+    users: rs => rs.map(toUser), activityLogs: rs => rs.map(toActivity), caja: r => r || null, lotes: rs => rs.map(toLote), presentaciones: rs => rs.map(toPresentacion),
   };
   const keys = Object.keys(q);
   const results = await Promise.allSettled(keys.map(k => q[k]));
@@ -136,7 +137,8 @@ export const ventas = {
       pedido_id: v.pedidoId || null,
       descuento: Number(v.discount) || 0,
       descuento_tipo: v.discountType === "pct" ? "pct" : "monto",
-      items: v.items.map(i => ({ producto_id: i.productId || null, nombre: i.name, unidad: i.unit, cantidad: Number(i.qty), precio_unitario: Number(i.unitPrice) })),
+      items: v.items.map(i => ({ producto_id: i.productId || null, nombre: i.name, unidad: i.unit, cantidad: Number(i.qty), precio_unitario: Number(i.unitPrice),
+        ...(i.factor && Number(i.factor) !== 1 ? { factor: Number(i.factor), presentacion: i.presentation || null } : {}) })),
       pagos: (v.payments || []).filter(x => Number(x.amount) > 0).map(x => ({ monto: Number(x.amount), metodo: x.method, referencia: x.reference || null })),
     };
     return toSale(await rpc("venta_registrar", { p }));
@@ -149,6 +151,15 @@ export const ventas = {
 };
 
 // ── Inventario ─────────────────────────────────────────────────────────────
+export const presentaciones = {
+  async guardar(p, empresaId) {
+    const fila = { producto_id: p.productId, nombre: p.name.trim(), factor: Number(p.factor), precio: Number(p.price) || 0, codigo: (p.barcode || "").trim() || null, orden: p.order || 0 };
+    const q = p.id ? supabase.from("producto_presentaciones").update(fila).eq("id", p.id) : supabase.from("producto_presentaciones").insert({ ...fila, empresa_id: empresaId });
+    return toPresentacion(ok(await q.select(PRESENTACION_COLS).single()));
+  },
+  async eliminar(id) { ok(await supabase.from("producto_presentaciones").update({ activo: false }).eq("id", id)); },
+};
+
 export const lotes = {
   async listar() { return ok(await todasLasFilas(t => supabase.from("lotes").select(LOTE_COLS, t ? { count: "exact" } : undefined).gt("cantidad", 0).order("vencimiento", { ascending: true, nullsFirst: false }).order("id"))).map(toLote); },
   // Entrada con número de lote y vencimiento (usa el mismo stock_movimiento del servidor)

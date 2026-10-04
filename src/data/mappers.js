@@ -8,7 +8,7 @@ const METODO_A_APP = { EFECTIVO: "efectivo", QR: "qr", TRANSFERENCIA: "banco", T
 export const metodoApp = m => METODO_A_APP[m] || "efectivo";
 
 // ── Productos ──────────────────────────────────────────────────────────────
-export const PRODUCTO_COLS = "id,nombre,precio_venta,precio_costo,stock,stock_minimo,unidad,descripcion,imagen_url,categoria_id,codigo,activo,created_at,padre_id,es_grupo,variante_nombre,atributos,controla_lotes";
+export const PRODUCTO_COLS = "id,nombre,precio_venta,precio_costo,stock,stock_minimo,unidad,descripcion,imagen_url,categoria_id,codigo,activo,created_at,padre_id,es_grupo,variante_nombre,atributos,controla_lotes,venta_fraccionada,precio_mayor,cantidad_mayor";
 export const toProduct = r => ({
   id: r.id,
   name: r.nombre || "",
@@ -28,6 +28,10 @@ export const toProduct = r => ({
   variantName: r.variante_nombre || "",
   attrs: r.atributos || null,
   lotControl: !!r.controla_lotes,
+  // Unidades: se vende con decimales (kg, m, L) y precio por mayor desde cierta cantidad
+  fraction: !!r.venta_fraccionada,
+  wholesalePrice: r.precio_mayor == null ? null : num(r.precio_mayor),
+  wholesaleQty: r.cantidad_mayor == null ? null : num(r.cantidad_mayor),
 });
 export const fromProduct = p => ({
   nombre: (p.name || "").trim(),
@@ -40,9 +44,16 @@ export const fromProduct = p => ({
   categoria_id: p.cat && p.cat !== DEFAULT_CATEGORY_ID ? p.cat : null,
   codigo: (p.barcode || "").trim() || null,
   ...(typeof p.lotControl === "boolean" ? { controla_lotes: p.lotControl } : {}),
+  ...(typeof p.fraction === "boolean" ? { venta_fraccionada: p.fraction } : {}),
+  ...("wholesalePrice" in p ? { precio_mayor: p.wholesalePrice === "" || p.wholesalePrice == null ? null : num(p.wholesalePrice) } : {}),
+  ...("wholesaleQty" in p ? { cantidad_mayor: p.wholesaleQty === "" || p.wholesaleQty == null || num(p.wholesaleQty) <= 0 ? null : num(p.wholesaleQty) } : {}),
 });
 
 // ── Lotes y vencimientos ───────────────────────────────────────────────────
+// ── Presentaciones (Caja x12, Paquete x6…) ─────────────────────────────────
+export const PRESENTACION_COLS = "id,producto_id,nombre,factor,precio,codigo,activo,orden";
+export const toPresentacion = r => ({ id: r.id, productId: r.producto_id, name: r.nombre, factor: num(r.factor), price: num(r.precio), barcode: r.codigo || "", order: r.orden || 0 });
+
 export const LOTE_COLS = "id,producto_id,codigo,vencimiento,cantidad,cantidad_inicial,costo_unitario,created_at";
 export const toLote = r => ({ id: r.id, productId: r.producto_id, code: r.codigo, expires: r.vencimiento || null, qty: num(r.cantidad), initialQty: num(r.cantidad_inicial), cost: num(r.costo_unitario), createdAt: r.created_at });
 
@@ -72,7 +83,7 @@ export const fromCustomer = c => ({
 });
 
 // ── Ventas ─────────────────────────────────────────────────────────────────
-export const VENTA_SELECT = "id,numero,estado,metodo_pago,cliente_id,cliente_nombre,cliente_mercado,fecha,created_at,subtotal,descuento,descuento_tipo,total,monto_pagado,deuda,notas,turno_id,pedido_id,anulada_at,usuario_id,venta_detalles(id,producto_id,nombre_producto,unidad,cantidad,precio_unitario,precio_costo,subtotal),pagos_venta(id,monto,metodo_pago,fecha,referencia,anulado)";
+export const VENTA_SELECT = "id,numero,estado,metodo_pago,cliente_id,cliente_nombre,cliente_mercado,fecha,created_at,subtotal,descuento,descuento_tipo,total,monto_pagado,deuda,notas,turno_id,pedido_id,anulada_at,usuario_id,venta_detalles(id,producto_id,nombre_producto,unidad,cantidad,precio_unitario,precio_costo,subtotal,presentacion,factor),pagos_venta(id,monto,metodo_pago,fecha,referencia,anulado)";
 export const toSale = r => {
   const pagos = (r.pagos || r.pagos_venta || []).filter(p => !p.anulado);
   const detalles = r.detalles || r.venta_detalles || [];
@@ -94,6 +105,8 @@ export const toSale = r => {
       qty: num(d.cantidad),
       unitPrice: num(d.precio_unitario),
       cost: num(d.precio_costo),
+      presentation: d.presentacion || null,
+      factor: num(d.factor) || 1,
       sub: num(d.subtotal ?? num(d.cantidad) * num(d.precio_unitario)),
       subtotal: num(d.subtotal ?? num(d.cantidad) * num(d.precio_unitario)),
     })),
@@ -213,7 +226,7 @@ export const toOrder = r => ({
 });
 
 // ── Empresa (configuración) ────────────────────────────────────────────────
-export const EMPRESA_COLS = "id,nombre,logo_url,qr_url,telefono,direccion,nit,email,rubro,moneda,timezone,plan,onboarding_completado_at";
+export const EMPRESA_COLS = "id,nombre,logo_url,qr_url,telefono,direccion,nit,email,rubro,moneda,timezone,plan,onboarding_completado_at,balanza";
 export const toConfig = r => ({
   empresaId: r.id,
   businessName: r.nombre || "",
@@ -228,6 +241,7 @@ export const toConfig = r => ({
   timezone: r.timezone || "America/La_Paz",
   plan: r.plan || "FREE",
   onboardingCompletado: !!r.onboarding_completado_at,
+  balanza: r.balanza || null,
 });
 export const fromConfig = c => ({
   nombre: (c.businessName || "").trim() || undefined,
@@ -239,6 +253,7 @@ export const fromConfig = c => ({
   nit: c.nit ?? undefined,
   email: c.email ?? undefined,
   rubro: c.rubro ?? undefined,
+  balanza: c.balanza ?? undefined,
 });
 
 // ── Usuarios y actividad ───────────────────────────────────────────────────

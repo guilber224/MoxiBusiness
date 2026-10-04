@@ -9,7 +9,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { supabase } from "../lib/supabaseClient";
 import * as api from "./api.js";
-import { PRODUCTO_COLS, toProduct, toCustomer, toExpense, toSale } from "./mappers.js";
+import { PRODUCTO_COLS, toProduct, toCustomer, toExpense, toSale, toPresentacion } from "./mappers.js";
 import { recordLocalChange, reconcileWithServer, resetLocalChanges } from "../utils/localChanges.js";
 import { DEFAULT_CATEGORY_ID } from "../categories.js";
 
@@ -17,7 +17,7 @@ const CACHE_VERSION = "v2";
 const cacheKey = eid => `moxi_${CACHE_VERSION}_${eid}`;
 export const VACIO = {
   config: { businessName: "", currency: "BOB", logo_url: null, qr_url: null }, products: [], categories: [], customers: [], sales: [], expenses: [], movements: [],
-  pedidos: [], suppliers: [], purchases: [], formulas: [], orders: [], users: [], activityLogs: [], caja: null, lotes: [],
+  pedidos: [], suppliers: [], purchases: [], formulas: [], orders: [], users: [], activityLogs: [], caja: null, lotes: [], presentaciones: [],
 };
 const leerCache = eid => { try { const v = JSON.parse(localStorage.getItem(cacheKey(eid))); return v && typeof v === "object" ? { ...VACIO, ...v } : null; } catch { return null; } };
 const escribirCache = (eid, data) => { try { localStorage.setItem(cacheKey(eid), JSON.stringify(data)); } catch { /* cuota llena: la app sigue funcionando sin caché */ } };
@@ -147,6 +147,10 @@ export function useMoxiData(user) {
         else if (p.new?.id) mutar("pedidos", ps => porId(ps, p.new));
       })
       .on("postgres_changes", { event: "*", schema: "public", table: "caja_turnos", filter: f }, () => refrescarCaja())
+      .on("postgres_changes", { event: "*", schema: "public", table: "producto_presentaciones", filter: f }, p => {
+        if (p.eventType === "DELETE" || p.new?.activo === false) mutar("presentaciones", ps => sinId(ps, p.old?.id || p.new?.id));
+        else if (p.new?.id) mutar("presentaciones", ps => porId(ps, toPresentacion(p.new)));
+      })
       .on("postgres_changes", { event: "*", schema: "public", table: "lotes", filter: f }, () => { clearTimeout(pendientes.get("lotes")); pendientes.set("lotes", setTimeout(refrescarLotes, 600)); })
       .subscribe();
     return () => { pendientes.forEach(clearTimeout); supabase.removeChannel(ch); };
@@ -260,6 +264,8 @@ export function useMoxiData(user) {
         return r;
       },
       reiniciarDatos: async (modulos, confirmacion) => { const r = await api.empresa.reiniciar(modulos, confirmacion); await cargar(); return r; },
+      guardarPresentacion: async p => { const r = await api.presentaciones.guardar(p, E()); mutar("presentaciones", ps => porId(ps, r)); return r; },
+      eliminarPresentacion: async id => { await api.presentaciones.eliminar(id); mutar("presentaciones", ps => sinId(ps, id)); },
       importarProductos: async (filas, actualizar) => { const r = await api.importar.productos(filas, actualizar); await cargar(); return r; },
       importarClientes: async (filas, actualizar) => { const r = await api.importar.clientes(filas, actualizar); await cargar(); return r; },
       completarOnboarding: async (completado = true) => { await api.empresa.onboarding(completado); setData(d => ({ ...d, config: { ...d.config, onboardingCompletado: completado } })); },
@@ -283,6 +289,11 @@ export function useMoxiData(user) {
     productos.forEach(p => { if (p.parentId) m.set(p.parentId, [...(m.get(p.parentId) || []), p]); });
     return m;
   }, [productos]);
-  const D = useMemo(() => ({ ...data, products: productos, catalogo, vendibles, variantesDe, config: data.config || VACIO.config, inventory }), [data, productos, catalogo, vendibles, variantesDe, inventory]);
+  const presentacionesDe = useMemo(() => {
+    const m = new Map();
+    (data.presentaciones || []).forEach(p => m.set(p.productId, [...(m.get(p.productId) || []), p].sort((a, b) => a.factor - b.factor)));
+    return m;
+  }, [data.presentaciones]);
+  const D = useMemo(() => ({ ...data, products: productos, catalogo, vendibles, variantesDe, presentacionesDe, config: data.config || VACIO.config, inventory }), [data, productos, catalogo, vendibles, variantesDe, presentacionesDe, inventory]);
   return { data: D, estado, acciones };
 }

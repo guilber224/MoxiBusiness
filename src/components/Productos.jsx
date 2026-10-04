@@ -13,12 +13,13 @@ import { Modal } from "./ui/Modal.jsx";
 import { SearchInput } from "./ui/SearchInput.jsx";
 import { ImportarExcel } from "./ImportarExcel.jsx";
 import { VariantesEditor } from "./VariantesEditor.jsx";
+import { PresentacionesEditor } from "./PresentacionesEditor.jsx";
 import { useMostrarMas } from "../hooks/useMostrarMas.js";
 import { BotonMostrarMas } from "./ui/BotonMostrarMas.jsx";
 
 
 const SIN_CATEGORIA = { id: DEFAULT_CATEGORY_ID, name: "Sin categoría", locked: true };
-const FORM_VACIO = { name: "", cat: DEFAULT_CATEGORY_ID, unit: "", price: "", cost: "", minStock: "", desc: "", img: null, barcode: "", lotControl: false, conVariantes: false };
+const FORM_VACIO = { name: "", cat: DEFAULT_CATEGORY_ID, unit: "", price: "", cost: "", minStock: "", desc: "", img: null, barcode: "", lotControl: false, conVariantes: false, fraction: false, wholesalePrice: "", wholesaleQty: "" };
 
 export function Productos({ D, A, user }) {
   // Catálogo: productos simples y productos con variantes (las variantes se gestionan dentro de su producto)
@@ -45,13 +46,14 @@ export function Productos({ D, A, user }) {
 
   const openForm = (product = null) => {
     setErr(""); setArchivo(null);
-    setForm(product ? { ...FORM_VACIO, ...product, price: product.price || "", cost: product.cost || "", minStock: product.minStock || "" } : { ...FORM_VACIO, cat: cat !== "all" ? cat : DEFAULT_CATEGORY_ID });
+    setForm(product ? { ...FORM_VACIO, ...product, price: product.price || "", cost: product.cost || "", minStock: product.minStock || "", wholesalePrice: product.wholesalePrice ?? "", wholesaleQty: product.wholesaleQty ?? "" } : { ...FORM_VACIO, cat: cat !== "all" ? cat : DEFAULT_CATEGORY_ID });
     setModal(product || "new");
   };
 
   const doSave = async () => {
     if (!form.name.trim()) { setErr("El nombre es obligatorio"); return; }
     if (n(form.price) < 0 || n(form.cost) < 0) { setErr("El precio y el costo no pueden ser negativos"); return; }
+    if ((form.wholesalePrice !== "") !== (form.wholesaleQty !== "")) { setErr("Para el precio por mayor indica el precio y desde qué cantidad"); return; }
     setErr("");
     const ok = await ejecutar(async () => {
       const datos = { ...form, price: n(form.price), cost: n(form.cost), minStock: n(form.minStock) };
@@ -190,6 +192,14 @@ export function Productos({ D, A, user }) {
           </div>
           {margen !== null && <div style={{ fontSize: 12, color: margen >= 0 ? C.green : C.red, fontWeight: 600, marginTop: -6, marginBottom: 8 }}>Margen: {margen}% · Ganancia: {Bs(n(form.price) - n(form.cost))} por unidad</div>}
           <div style={row()}>
+            <div style={{ flex: 1 }}><label style={lbl}>Precio por mayor</label><input type="number" min="0" step="0.01" inputMode="decimal" style={inp} value={form.wholesalePrice} onChange={e => setForm({ ...form, wholesalePrice: e.target.value })} placeholder="Opcional" /></div>
+            <div style={{ flex: 1 }}><label style={lbl}>Desde (cantidad)</label><input type="number" min="0" step="any" inputMode="decimal" style={inp} value={form.wholesaleQty} onChange={e => setForm({ ...form, wholesaleQty: e.target.value })} placeholder="Ej: 12" /></div>
+          </div>
+          {modal !== "new" && !modal.isGroup && <div style={{ marginBottom: 12, padding: 10, borderRadius: 10, background: "var(--color-bg-primary)" }}>
+            <div style={{ fontWeight: 700, fontSize: 12, marginBottom: 6 }}>Presentaciones de venta <span style={{ fontWeight: 400, color: C.textFaint }}>(caja, paquete, docena… el stock se descuenta en {form.unit || "unidades"})</span></div>
+            <PresentacionesEditor producto={modal} presentaciones={D.presentacionesDe?.get(modal.id) || []} A={A} />
+          </div>}
+          <div style={row()}>
             <div style={{ flex: 1 }}><label style={lbl}>Código de barras</label><input style={inp} value={form.barcode} onChange={e => setForm({ ...form, barcode: e.target.value })} placeholder="Opcional" /></div>
             <div style={{ flex: 2 }}><label style={lbl}>Descripción</label><input style={inp} value={form.desc} onChange={e => setForm({ ...form, desc: e.target.value })} placeholder="Opcional" /></div>
           </div>
@@ -205,6 +215,10 @@ export function Productos({ D, A, user }) {
                 <button onClick={() => { setModal(null); setEditVariantes(modal); }} style={{ ...mkBtn("ghost"), fontSize: 12 }}>🎨 {modal.isGroup ? "Editar variantes" : "Crear variantes"}</button>
               </div>
             )}
+            <label style={{ display: "flex", gap: 8, alignItems: "center", fontSize: 13, cursor: "pointer" }}>
+              <input type="checkbox" checked={!!form.fraction} onChange={e => setForm({ ...form, fraction: e.target.checked })} />
+              <span><strong>Se vende por peso o medida</strong> (kg, metros, litros): permite cantidades con decimales o por monto</span>
+            </label>
             <label style={{ display: "flex", gap: 8, alignItems: "center", fontSize: 13, cursor: "pointer" }}>
               <input type="checkbox" checked={!!form.lotControl} onChange={e => setForm({ ...form, lotControl: e.target.checked })} />
               <span><strong>Controlar lotes y vencimientos</strong> (farmacia, alimentos): las ventas descuentan primero lo que vence antes</span>

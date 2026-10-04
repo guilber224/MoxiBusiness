@@ -15,6 +15,7 @@ import { Table } from "./ui/Table.jsx";
 import { PagarSuscripcion } from "./PagarSuscripcion.jsx";
 import { planIncluye } from "../services/cobrosService.js";
 import { ReiniciarDatos } from "./ReiniciarDatos.jsx";
+import { ConfigBalanza } from "./ConfigBalanza.jsx";
 
 const ROLES = [
   { id: "admin", label: "Administrador", desc: "Acceso total, incluida la configuración y el equipo" },
@@ -221,6 +222,8 @@ export function UsuariosAdmin({ D, A, user, onProfileUpdate, suscripcion, onSusc
             { key: "action", label: "Acción" },
           ]} rows={(activityLogs || []).slice(0, 100)} />}
       </div>}
+
+      <ConfigBalanza A={A} config={config} puedeEditar={admin} />
 
       {admin && <ReiniciarDatos A={A} config={config} setTab={setTab} />}
 

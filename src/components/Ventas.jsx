@@ -19,6 +19,8 @@ import { SearchInput } from "./ui/SearchInput.jsx";
 import { useMostrarMas } from "../hooks/useMostrarMas.js";
 import { BotonMostrarMas } from "./ui/BotonMostrarMas.jsx";
 import { SelectorVariante } from "./ui/SelectorVariante.jsx";
+import { SelectorCantidad } from "./ui/SelectorCantidad.jsx";
+import { precioSugerido, cantidadPorMonto, leerEtiquetaBalanza, leerBalanza, coincidePLU } from "../utils/precios.js";
 import { imprimirTicket, leerAnchoTicket, guardarAnchoTicket, leerAutoTicket, guardarAutoTicket } from "../utils/ticketTermico.js";
 import { Chip } from "./ui/Chip.jsx";
 
@@ -473,23 +475,55 @@ export function Ventas({ D, A, user, estado }) {
   const GUEST = { id: "__guest__", name: "Público general", market: "", phone: "" };
 
   const getStock = id => products.find(p => p.id === id)?.stock ?? 0;
-  const updateItem = (id, field, val) => setForm(f => ({ ...f, items: f.items.map(it => { if (it.id !== id) return it; const u = { ...it, [field]: val }; if (field === "productId") { const p = products.find(p => p.id === val); if (p) { u.unitPrice = p.price; u.original_price = p.price; } } if (field === "unitPrice" && !u.original_price) u.original_price = it.unitPrice || it.original_price; const sub = n(u.qty) * n(u.unitPrice); return { ...u, sub, subtotal: sub }; }) }));
+  const updateItem = (id, field, val) => setForm(f => ({ ...f, items: f.items.map(it => {
+    if (it.id !== id) return it;
+    const u = { ...it, [field]: val };
+    if (field === "productId") { const p = products.find(p => p.id === val); if (p) { u.unitPrice = p.price; u.original_price = p.price; } }
+    if (field === "unitPrice") { u.precioManual = true; if (!u.original_price) u.original_price = it.unitPrice || it.original_price; }
+    if (field === "qty" && !u.precioManual && !u.presentation) { const p = products.find(x => x.id === u.productId); if (p) u.unitPrice = precioSugerido(p, n(val)); }
+    const sub = n(u.qty) * n(u.unitPrice); return { ...u, sub, subtotal: sub };
+  }) }));
   const addItem = () => setForm(f => ({ ...f, items: [...f.items, SALE_BASE_ITEM()] }));
-  const addProductToCart = productId => setForm(f => {
+  // Línea del carrito: misma presentación = misma línea. Precio: presentación, por mayor o normal.
+  const addProductToCart = (productId, opts = {}) => setForm(f => {
     const product = products.find(item => item.id === productId); if (!product) return f;
-    const existing = f.items.find(item => item.productId === productId);
+    const pres = opts.presentation || null;
+    const qtyAdd = n(opts.qty) || 1;
+    const existing = f.items.find(item => item.productId === productId && (item.presentation || null) === (pres?.name || null));
     if (existing) {
-      return { ...f, items: f.items.map(item => { if (item.id !== existing.id) return item; const qty = n(item.qty) + 1; const sub = qty * n(item.unitPrice || product.price); return { ...item, qty, unitPrice: n(item.unitPrice || product.price), sub, subtotal: sub }; }) };
+      return { ...f, items: f.items.map(item => { if (item.id !== existing.id) return item; const qty = Math.round((n(item.qty) + qtyAdd) * 1000) / 1000; const unitPrice = item.precioManual ? n(item.unitPrice) : precioSugerido(product, qty, pres); const sub = qty * unitPrice; return { ...item, qty, unitPrice, sub, subtotal: sub }; }) };
     }
-    const sub = n(product.price);
-    return { ...f, items: [...f.items, { id: uid(), productId, qty: 1, unitPrice: sub, original_price: sub, sub, subtotal: sub }] };
+    const price = precioSugerido(product, qtyAdd, pres);
+    return { ...f, items: [...f.items, { id: uid(), productId, qty: qtyAdd, unitPrice: price, original_price: price, sub: qtyAdd * price, subtotal: qtyAdd * price,
+      presentation: pres?.name || null, factor: pres?.factor || 1 }] };
   });
   // Producto con variantes: primero se elige la talla/color
   const [eligiendoVariante, setEligiendoVariante] = useState(null);
   const agregarAlCarrito = productId => {
     const p = products.find(x => x.id === productId);
     if (p?.isGroup) { setEligiendoVariante(p); return; }
-    addProductToCart(productId);
+    if (p) agregarProducto(p);
+  };
+  const [eligiendoCantidad, setEligiendoCantidad] = useState(null);
+  const agregarProducto = p => {
+    if (p.fraction || (D.presentacionesDe?.get(p.id) || []).length) setEligiendoCantidad(p);
+    else addProductToCart(p.id);
+  };
+  // Lector: etiqueta de balanza → código del producto → código de una presentación → nombre exacto
+  const resolverCodigo = codigo => {
+    const c = String(codigo || "").trim(); if (!c) return false;
+    const et = leerEtiquetaBalanza(c, leerBalanza(config));
+    if (et) {
+      const p = products.find(x => !x.isGroup && coincidePLU(x.barcode, et.plu));
+      if (p) { addProductToCart(p.id, { qty: et.peso ?? cantidadPorMonto(et.monto, p.price) }); return true; }
+    }
+    const p = products.find(x => !x.isGroup && x.barcode && x.barcode === c);
+    if (p) { addProductToCart(p.id); return true; }
+    const pr = (D.presentaciones || []).find(x => x.barcode && x.barcode === c);
+    if (pr) { addProductToCart(pr.productId, { presentation: pr }); return true; }
+    const porNombre = products.find(x => x.name.toLowerCase() === c.toLowerCase());
+    if (porNombre) { agregarAlCarrito(porNombre.id); return true; }
+    return false;
   };
   const enCarrito = p => form.items.filter(i => i.productId === p.id || products.find(x => x.id === i.productId)?.parentId === p.id).reduce((a, i) => a + n(i.qty), 0);
   const removeItem = id => setForm(f => ({ ...f, items: f.items.filter(i => i.id !== id) }));
@@ -504,8 +538,7 @@ export function Ventas({ D, A, user, estado }) {
   const handleBarcode = e => {
     if (e.key !== "Enter" || !barcodeInput.trim()) return;
     const q2 = barcodeInput.trim().toLowerCase();
-    const p = products.find(x => (x.barcode && x.barcode === barcodeInput.trim()) || x.name.toLowerCase() === q2);
-    if (p) { agregarAlCarrito(p.id); setBarcodeInput(""); }
+    if (resolverCodigo(barcodeInput)) setBarcodeInput("");
     else { setErr(`Producto "${barcodeInput.trim()}" no encontrado`); setBarcodeInput(""); }
   };
 
@@ -526,7 +559,7 @@ export function Ventas({ D, A, user, estado }) {
     if (!cust) { setErr("Cliente no encontrado"); return; }
     if (debtN > 0.005 && form.customerId === "__guest__") { setErr("Para vender a crédito o con pago parcial, selecciona o registra un cliente."); return; }
     const porProducto = {};
-    valid.forEach(it => { porProducto[it.productId] = (porProducto[it.productId] || 0) + n(it.qty); });
+    valid.forEach(it => { porProducto[it.productId] = (porProducto[it.productId] || 0) + n(it.qty) * (it.factor || 1); });
     const sinStock = Object.entries(porProducto).filter(([id, qty]) => qty > getStock(id));
     if (sinStock.length > 0 && !confirmStock) {
       setConfirmStock(true);
@@ -538,7 +571,7 @@ export function Ventas({ D, A, user, estado }) {
       customerId: form.customerId,
       customerName: cust.name,
       date: form.date && form.date !== today() ? new Date(form.date + "T12:00:00").toISOString() : null,
-      items: valid.map(it => { const p = products.find(x => x.id === it.productId); return { productId: it.productId, name: p?.name || it.name || "Producto", unit: p?.unit || "", qty: n(it.qty), unitPrice: n(it.unitPrice) }; }),
+      items: valid.map(it => { const p = products.find(x => x.id === it.productId); return { productId: it.productId, name: p?.name || it.name || "Producto", unit: it.presentation || p?.unit || "", qty: n(it.qty), unitPrice: n(it.unitPrice), factor: it.factor || 1, presentation: it.presentation || null }; }),
       discount: n(form.discount), discountType: form.discountType === "pct" ? "pct" : "amount",
       payments: aplicado > 0 ? [{ amount: aplicado, method: form.paymentMethod }] : [],
       notes: form.notes,
@@ -721,7 +754,7 @@ export function Ventas({ D, A, user, estado }) {
                       <Search size={13} style={{ position: "absolute", left: 9, top: "50%", transform: "translateY(-50%)", color: C.textFaint, pointerEvents: "none" }} />
                       <input value={posSearch} onChange={e => setPosSearch(e.target.value)} placeholder="Buscar producto..." style={{ ...inp, paddingLeft: 28, margin: 0, fontSize: 13 }} />
                     </div>
-                    <BarcodeScannerButton onScan={code => { const p = products.find(x => x.barcode === code || x.name.toLowerCase() === code.toLowerCase()); if (p) agregarAlCarrito(p.id); else setErr(`Código "${code}" no encontrado`); }} />
+                    <BarcodeScannerButton onScan={code => { if (!resolverCodigo(code)) setErr(`Código "${code}" no encontrado`); }} />
                   </div>
                   <div style={{ padding: "6px 12px", borderBottom: `1px solid ${C.border}`, flexShrink: 0, display: "flex", gap: 6, overflowX: "auto" }}>
                     {posCategories.map(([v, l]) => (
@@ -810,11 +843,11 @@ export function Ventas({ D, A, user, estado }) {
                         const product = products.find(p => p.id === it.productId);
                         if (!product) return null;
                         const stock = getStock(it.productId);
-                        const overStock = n(it.qty) > stock && stock > 0;
+                        const overStock = n(it.qty) * (it.factor || 1) > stock && stock > 0;
                         return (
                           <div key={it.id} style={{ display: "flex", alignItems: "center", gap: 8, padding: "8px 0", borderBottom: `1px solid ${C.border}` }}>
                             <div style={{ flex: 1, minWidth: 0 }}>
-                              <div style={{ fontWeight: 600, fontSize: 13, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{product.name}</div>
+                              <div style={{ fontWeight: 600, fontSize: 13, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{product.name}{it.presentation && <span style={{ color: C.brand }}> · {it.presentation}</span>}</div>
                               <div style={{ display: "flex", alignItems: "center", gap: 3 }}>
                                 <input type="number" min="0" step="0.01" value={it.unitPrice} onChange={e => updateItem(it.id, "unitPrice", e.target.value)}
                                   style={{ width: 62, fontSize: 11, border: `1px solid ${C.border}`, borderRadius: 4, padding: "2px 4px", background: C.surface, color: overStock ? C.amber : C.textMid, outline: "none", fontFamily: FONT }} />
@@ -823,7 +856,7 @@ export function Ventas({ D, A, user, estado }) {
                             </div>
                             <div style={{ display: "flex", alignItems: "center", gap: 4, flexShrink: 0 }}>
                               <button onClick={() => updateItem(it.id, "qty", Math.max(0.1, n(it.qty) - 1))} style={{ width: 26, height: 26, borderRadius: 6, border: `1px solid ${C.border}`, background: C.bg, cursor: "pointer", fontSize: 15, display: "flex", alignItems: "center", justifyContent: "center", color: C.textMid }}>−</button>
-                              <span style={{ fontSize: 13, fontWeight: 700, minWidth: 22, textAlign: "center", color: C.brand }}>{n(it.qty)}</span>
+                              <input type="number" inputMode="decimal" min="0" step="any" aria-label="Cantidad" value={it.qty} onChange={e => updateItem(it.id, "qty", e.target.value)} style={{ width: 46, textAlign: "center", border: `1px solid ${C.border}`, borderRadius: 6, padding: "3px 2px", fontSize: 13, fontWeight: 700, background: C.surface, color: C.brand, outline: "none" }} />
                               <button onClick={() => updateItem(it.id, "qty", n(it.qty) + 1)} style={{ width: 26, height: 26, borderRadius: 6, border: `1px solid ${C.border}`, background: C.bg, cursor: "pointer", fontSize: 15, display: "flex", alignItems: "center", justifyContent: "center", color: C.textMid }}>+</button>
                             </div>
                             <span style={{ fontSize: 13, fontWeight: 800, color: C.red, minWidth: 58, textAlign: "right" }}>{Bs(it.sub ?? it.subtotal)}</span>
@@ -937,7 +970,7 @@ export function Ventas({ D, A, user, estado }) {
                         <ScanLine size={12} style={{ position: "absolute", left: 9, top: "50%", transform: "translateY(-50%)", color: C.textFaint, pointerEvents: "none" }} />
                         <input ref={barcodeRef} value={barcodeInput} onChange={e => setBarcodeInput(e.target.value)} onKeyDown={handleBarcode} placeholder="Código barras…" style={{ ...inp, paddingLeft: 28, margin: 0, fontSize: 12 }} />
                       </div>
-                      <BarcodeScannerButton onScan={code => { const p = products.find(x => x.barcode === code || x.name.toLowerCase() === code.toLowerCase()); if (p) agregarAlCarrito(p.id); else setErr(`Código "${code}" no encontrado`); }} />
+                      <BarcodeScannerButton onScan={code => { if (!resolverCodigo(code)) setErr(`Código "${code}" no encontrado`); }} />
                     </div>
                     <div style={{ padding: "6px 14px", borderBottom: `1px solid ${C.border}`, flexShrink: 0, display: "flex", gap: 4, overflowX: "auto" }}>
                       {posCategories.map(([v, l]) => (
@@ -1003,11 +1036,11 @@ export function Ventas({ D, A, user, estado }) {
                         const product = products.find(p => p.id === it.productId);
                         if (!product) return null;
                         const stock = getStock(it.productId);
-                        const overStock = n(it.qty) > stock && stock > 0;
+                        const overStock = n(it.qty) * (it.factor || 1) > stock && stock > 0;
                         return (
                           <div key={it.id} style={{ display: "flex", alignItems: "center", gap: 7, padding: "7px 9px", marginBottom: 5, background: C.bg, borderRadius: R.md, border: `1px solid ${overStock ? C.amber : C.border}` }}>
                             <div style={{ flex: 1, minWidth: 0 }}>
-                              <div style={{ fontWeight: 600, fontSize: 12, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{product.name}</div>
+                              <div style={{ fontWeight: 600, fontSize: 12, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{product.name}{it.presentation && <span style={{ color: C.brand }}> · {it.presentation}</span>}</div>
                               <div style={{ display: "flex", alignItems: "center", gap: 3 }}>
                                 <input type="number" min="0" step="0.01" value={it.unitPrice} onChange={e => updateItem(it.id, "unitPrice", e.target.value)}
                                   style={{ width: 58, fontSize: 10, border: `1px solid ${C.border}`, borderRadius: 4, padding: "1px 4px", background: C.surface, color: overStock ? C.amber : C.textMid, outline: "none", fontFamily: FONT }} />
@@ -1016,7 +1049,7 @@ export function Ventas({ D, A, user, estado }) {
                             </div>
                             <div style={{ display: "flex", alignItems: "center", gap: 3, flexShrink: 0 }}>
                               <button onClick={() => updateItem(it.id, "qty", Math.max(0.1, n(it.qty) - 1))} style={{ width: 24, height: 24, borderRadius: 5, border: `1px solid ${C.border}`, background: C.surface, cursor: "pointer", fontSize: 14, lineHeight: 1, display: "flex", alignItems: "center", justifyContent: "center", color: C.textMid, flexShrink: 0 }}>−</button>
-                              <input type="number" min="0.1" step="0.1" value={it.qty} onChange={e => updateItem(it.id, "qty", e.target.value)} style={{ width: 40, textAlign: "center", border: `1px solid ${C.border}`, borderRadius: 5, padding: "3px 2px", fontSize: 12, fontWeight: 700, background: C.surface, color: C.brand, outline: "none", minHeight: "unset" }} />
+                              <input type="number" inputMode="decimal" min="0" step="any" aria-label="Cantidad" value={it.qty} onChange={e => updateItem(it.id, "qty", e.target.value)} style={{ width: 40, textAlign: "center", border: `1px solid ${C.border}`, borderRadius: 5, padding: "3px 2px", fontSize: 12, fontWeight: 700, background: C.surface, color: C.brand, outline: "none", minHeight: "unset" }} />
                               <button onClick={() => updateItem(it.id, "qty", n(it.qty) + 1)} style={{ width: 24, height: 24, borderRadius: 5, border: `1px solid ${C.border}`, background: C.surface, cursor: "pointer", fontSize: 14, lineHeight: 1, display: "flex", alignItems: "center", justifyContent: "center", color: C.textMid, flexShrink: 0 }}>+</button>
                             </div>
                             <div style={{ fontWeight: 800, fontSize: 13, color: C.red, textAlign: "right", minWidth: 56, flexShrink: 0 }}>{Bs(it.sub ?? it.subtotal)}</div>
@@ -1117,7 +1150,8 @@ export function Ventas({ D, A, user, estado }) {
         </div>
       </Modal>}
       {comprobanteVenta && <ComprobanteModal sale={comprobanteVenta} config={config} user={user} products={D.products} onClose={() => setComprobanteVenta(null)} />}
-      {eligiendoVariante && <SelectorVariante grupo={eligiendoVariante} variantes={D.variantesDe?.get(eligiendoVariante.id) || []} onClose={() => setEligiendoVariante(null)} onElegir={v => { addProductToCart(v.id); setEligiendoVariante(null); }} />}
+      {eligiendoVariante && <SelectorVariante grupo={eligiendoVariante} variantes={D.variantesDe?.get(eligiendoVariante.id) || []} onClose={() => setEligiendoVariante(null)} onElegir={v => { setEligiendoVariante(null); agregarProducto(v); }} />}
+      {eligiendoCantidad && <SelectorCantidad producto={eligiendoCantidad} presentaciones={D.presentacionesDe?.get(eligiendoCantidad.id) || []} onClose={() => setEligiendoCantidad(null)} onElegir={o => { addProductToCart(eligiendoCantidad.id, o); setEligiendoCantidad(null); }} />}
     </div>
   );
 }
