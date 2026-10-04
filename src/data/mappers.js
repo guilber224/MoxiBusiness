@@ -66,6 +66,16 @@ export const toOrdenServicio = r => ({
   garantiaDias: r.garantia_dias ?? null, notas: r.notas || "", ventaId: r.venta_id || null, usuario: r.usuario_nombre || "",
 });
 
+// ── Agenda y citas ─────────────────────────────────────────────────────────
+export const toCita = r => ({
+  id: r.id, estado: r.estado, inicio: r.inicio, fin: r.fin, profesional: r.profesional || "", servicio: r.servicio || "",
+  customerId: r.cliente_id || null, customerName: r.cliente_nombre || "", phone: r.cliente_telefono || "",
+  items: (r.items || []).map(i => ({ productId: i.producto_id || null, name: i.nombre, qty: num(i.cantidad), price: num(i.precio) })),
+  total: (r.items || []).reduce((a, i) => a + num(i.cantidad) * num(i.precio), 0),
+  anticipo: num(r.anticipo), anticipoMetodo: r.anticipo_metodo || "", notas: r.notas || "", motivo: r.motivo_cancelacion || "",
+  recordada: r.recordada_at || null, ventaId: r.venta_id || null, usuario: r.usuario_nombre || "", createdAt: r.created_at,
+});
+
 export const LOTE_COLS = "id,producto_id,codigo,vencimiento,cantidad,cantidad_inicial,costo_unitario,created_at";
 export const toLote = r => ({ id: r.id, productId: r.producto_id, code: r.codigo, expires: r.vencimiento || null, qty: num(r.cantidad), initialQty: num(r.cantidad_inicial), cost: num(r.costo_unitario), createdAt: r.created_at });
 
@@ -238,7 +248,7 @@ export const toOrder = r => ({
 });
 
 // ── Empresa (configuración) ────────────────────────────────────────────────
-export const EMPRESA_COLS = "id,nombre,logo_url,qr_url,telefono,direccion,nit,email,rubro,moneda,timezone,plan,onboarding_completado_at,balanza";
+export const EMPRESA_COLS = "id,nombre,logo_url,qr_url,telefono,direccion,nit,email,rubro,moneda,timezone,plan,onboarding_completado_at,balanza,agenda";
 export const toConfig = r => ({
   empresaId: r.id,
   businessName: r.nombre || "",
@@ -254,6 +264,7 @@ export const toConfig = r => ({
   plan: r.plan || "FREE",
   onboardingCompletado: !!r.onboarding_completado_at,
   balanza: r.balanza || null,
+  agenda: r.agenda || null,
 });
 export const fromConfig = c => ({
   nombre: (c.businessName || "").trim() || undefined,
@@ -266,6 +277,7 @@ export const fromConfig = c => ({
   email: c.email ?? undefined,
   rubro: c.rubro ?? undefined,
   balanza: c.balanza ?? undefined,
+  agenda: c.agenda ?? undefined,
 });
 
 // ── Usuarios y actividad ───────────────────────────────────────────────────

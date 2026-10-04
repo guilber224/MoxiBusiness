@@ -18,6 +18,7 @@ import { cobrosService, planIncluye } from "./services/cobrosService.js";
 import { PlanBloqueado } from "./components/PlanBloqueado.jsx";
 import { useAvisosCuenta } from "./hooks/useAvisosCuenta.js";
 import { diasParaVencer } from "./utils/lotes.js";
+import { CITA_ABIERTA, fechaLocal, sumarDias } from "./utils/agenda.js";
 import { today } from "./utils/businessLogic.js";
 import { useMoxiData } from "./data/useMoxiData.js";
 import { EstadoDatos } from "./components/ui/EstadoDatos.jsx";
@@ -42,6 +43,7 @@ const Productos = lazyWithReload(() => import("./components/Productos.jsx").then
 const Inventario = lazyWithReload(() => import("./components/Inventario.jsx").then(m => ({ default: m.Inventario })));
 const Ventas = lazyWithReload(() => import("./components/Ventas.jsx").then(m => ({ default: m.Ventas })));
 const Pedidos = lazyWithReload(() => import("./components/Pedidos.jsx").then(m => ({ default: m.Pedidos })));
+const Agenda = lazyWithReload(() => import("./components/Agenda.jsx").then(m => ({ default: m.Agenda })));
 const Servicios = lazyWithReload(() => import("./components/Servicios.jsx").then(m => ({ default: m.Servicios })));
 const Deudas = lazyWithReload(() => import("./components/Deudas.jsx").then(m => ({ default: m.Deudas })));
 const Produccion = lazyWithReload(() => import("./components/Produccion.jsx").then(m => ({ default: m.Produccion })));
@@ -172,6 +174,12 @@ export default function App() {
     if (pronto) lista.push({ id: `lotes-pronto-${today()}-${pronto}`, tipo: "warn", titulo: `${pronto} lote${pronto === 1 ? "" : "s"} vence${pronto === 1 ? "" : "n"} en 30 días`, texto: "Revisa Inventario → Lotes y vencimientos", tab: "inventario" });
     return lista;
   }, [data.lotes]);
+  // Citas de mañana sin recordatorio enviado
+  const avisosAgenda = useMemo(() => {
+    const manana = sumarDias(today(), 1);
+    const n = (data.citas || []).filter(c => CITA_ABIERTA(c.estado) && !c.recordada && fechaLocal(c.inicio) === manana).length;
+    return n ? [{ id: `citas-${manana}-${n}`, tipo: "warn", titulo: `${n} cita${n === 1 ? "" : "s"} mañana sin recordatorio`, texto: "Envía el recordatorio por WhatsApp desde la Agenda", tab: "agenda" }] : [];
+  }, [data.citas]);
   const appLowStock = useMemo(() => data.products.filter(p => !p.isGroup && p.minStock > 0 && p.stock <= p.minStock), [data.products]);
 
   const loadingScreen = (
@@ -216,7 +224,7 @@ export default function App() {
           />
         )}
         <div style={{ display: "flex", flexDirection: "column", flex: 1, minWidth: 0, overflow: "hidden" }}>
-          <Topbar isMobile={isMobile} sidebarOpen={sidebarOpen} setSidebarOpen={setSidebarOpen} sidebarCollapsed={sidebarCollapsed} setSidebarCollapsed={setSidebarCollapsed} setTab={setTab} user={user} data={data} appDebtClients={appDebtClients} appLowStock={appLowStock} avisos={[...avisosCuenta, ...avisosLotes]} onDescartarAviso={descartarAviso} />
+          <Topbar isMobile={isMobile} sidebarOpen={sidebarOpen} setSidebarOpen={setSidebarOpen} sidebarCollapsed={sidebarCollapsed} setSidebarCollapsed={setSidebarCollapsed} setTab={setTab} user={user} data={data} appDebtClients={appDebtClients} appLowStock={appLowStock} avisos={[...avisosCuenta, ...avisosLotes, ...avisosAgenda]} onDescartarAviso={descartarAviso} />
 
           {user.role !== "superadmin" && suscripcion && !suscripcionService.estaVencida(suscripcion) && dias <= 7 && (
             <div style={{ background: "#92400e", borderBottom: "1px solid #b45309", padding: "8px 18px", display: "flex", alignItems: "center", gap: 10, fontSize: 13, color: "#fef3c7", flexShrink: 0, flexWrap: "wrap" }}>
@@ -240,6 +248,7 @@ export default function App() {
                 {seccion("ventas", <Ventas {...props} />)}
                 {seccion("pedidos", <Pedidos {...props} />)}
                 {seccion("servicios", <Servicios {...props} />)}
+                {seccion("agenda", <Agenda {...props} />)}
                 {seccion("deudas", <Deudas {...props} />)}
                 {seccion("productos", <Productos {...props} />)}
                 {seccion("inventario", <Inventario {...props} />)}

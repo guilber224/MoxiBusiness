@@ -9,7 +9,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { supabase } from "../lib/supabaseClient";
 import * as api from "./api.js";
-import { PRODUCTO_COLS, toProduct, toCustomer, toExpense, toSale, toPresentacion } from "./mappers.js";
+import { PRODUCTO_COLS, toProduct, toCustomer, toExpense, toSale, toPresentacion, toCita } from "./mappers.js";
 import { recordLocalChange, reconcileWithServer, resetLocalChanges } from "../utils/localChanges.js";
 import { DEFAULT_CATEGORY_ID } from "../categories.js";
 
@@ -17,7 +17,7 @@ const CACHE_VERSION = "v2";
 const cacheKey = eid => `moxi_${CACHE_VERSION}_${eid}`;
 export const VACIO = {
   config: { businessName: "", currency: "BOB", logo_url: null, qr_url: null }, products: [], categories: [], customers: [], sales: [], expenses: [], movements: [],
-  pedidos: [], suppliers: [], purchases: [], formulas: [], orders: [], users: [], activityLogs: [], caja: null, lotes: [], presentaciones: [], servicios: [],
+  pedidos: [], suppliers: [], purchases: [], formulas: [], orders: [], users: [], activityLogs: [], caja: null, lotes: [], presentaciones: [], servicios: [], citas: [],
 };
 const leerCache = eid => { try { const v = JSON.parse(localStorage.getItem(cacheKey(eid))); return v && typeof v === "object" ? { ...VACIO, ...v } : null; } catch { return null; } };
 const escribirCache = (eid, data) => { try { localStorage.setItem(cacheKey(eid), JSON.stringify(data)); } catch { /* cuota llena: la app sigue funcionando sin caché */ } };
@@ -154,6 +154,10 @@ export function useMoxiData(user) {
       .on("postgres_changes", { event: "*", schema: "public", table: "ordenes_servicio", filter: f }, p => {
         if (p.new?.id) api.servicios.obtener(p.new.id).then(o => mutar("servicios", os => porId(os, o))).catch(() => {});
       })
+      .on("postgres_changes", { event: "*", schema: "public", table: "citas", filter: f }, p => {
+        if (p.eventType === "DELETE") mutar("citas", cs => sinId(cs, p.old?.id));
+        else if (p.new?.id) mutar("citas", cs => porId(cs, toCita(p.new)));
+      })
       .on("postgres_changes", { event: "*", schema: "public", table: "lotes", filter: f }, () => { clearTimeout(pendientes.get("lotes")); pendientes.set("lotes", setTimeout(refrescarLotes, 600)); })
       .subscribe();
     return () => { pendientes.forEach(clearTimeout); supabase.removeChannel(ch); };
@@ -282,6 +286,20 @@ export function useMoxiData(user) {
       },
       cancelarServicio: async (id, motivo, devolver) => { const r = await api.servicios.cancelar(id, motivo, devolver); mutar("servicios", os => porId(os, r)); refrescarCaja(); return r; },
       eventosServicio: id => api.servicios.eventos(id),
+      // Agenda
+      guardarCita: async (c, forzar) => { const r = await api.citas.guardar(c, forzar); mutar("citas", cs => porId(cs, r)); if (!c.id && r.anticipo > 0) refrescarCaja(); return r; },
+      estadoCita: async (id, estado) => { const r = await api.citas.estado(id, estado); mutar("citas", cs => porId(cs, r)); return r; },
+      citaRecordada: async id => { const r = await api.citas.recordada(id); mutar("citas", cs => porId(cs, r)); return r; },
+      atenderCita: async (id, pagos) => {
+        const r = await api.citas.atender(id, pagos);
+        mutar("citas", cs => porId(cs, r.cita));
+        if (r.venta?.id) { const v = await api.ventas.obtener(r.venta.id); if (v?.id) mutar("sales", ss => porId(ss, v)); }
+        refrescarProductos((r.cita.items || []).map(i => i.productId).filter(Boolean)); refrescarCaja(); refrescarKardex();
+        return r;
+      },
+      cancelarCita: async (id, motivo, devolver) => { const r = await api.citas.cancelar(id, motivo, devolver); mutar("citas", cs => porId(cs, r)); if (devolver) refrescarCaja(); return r; },
+      // Trae citas de un rango que no se cargó al inicio (meses anteriores)
+      cargarCitas: async (desde, hasta) => { const rs = await api.citas.rango(desde, hasta); mutar("citas", cs => rs.reduce((acc, c) => porId(acc, c), cs)); return rs; },
       importarProductos: async (filas, actualizar) => { const r = await api.importar.productos(filas, actualizar); await cargar(); return r; },
       importarClientes: async (filas, actualizar) => { const r = await api.importar.clientes(filas, actualizar); await cargar(); return r; },
       completarOnboarding: async (completado = true) => { await api.empresa.onboarding(completado); setData(d => ({ ...d, config: { ...d.config, onboardingCompletado: completado } })); },

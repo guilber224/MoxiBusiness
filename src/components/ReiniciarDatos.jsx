@@ -13,6 +13,8 @@ const MODULOS = [
   ["proveedores", "Proveedores y compras", "Proveedores, compras y deudas con proveedores."],
   ["pedidos", "Pedidos y cotizaciones", "Todos los pedidos y cotizaciones."],
   ["produccion", "Producción", "Fórmulas y órdenes de producción."],
+  ["servicios", "Servicio técnico", "Todas las órdenes de servicio y su historial. Las ventas que generaron se conservan."],
+  ["agenda", "Agenda y citas", "Todas las citas. Las ventas que generaron se conservan."],
   ["actividad", "Registro de actividad", "El historial de quién hizo qué."],
 ];
 
