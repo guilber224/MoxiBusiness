@@ -66,6 +66,22 @@ export const toOrdenServicio = r => ({
   garantiaDias: r.garantia_dias ?? null, notas: r.notas || "", ventaId: r.venta_id || null, usuario: r.usuario_nombre || "",
 });
 
+// ── Mesas y comandas ───────────────────────────────────────────────────────
+export const toMesa = r => ({ id: r.id, name: r.nombre, zona: r.zona || "", capacidad: r.capacidad ?? null, orden: r.orden || 0 });
+export const toComandaItem = r => ({
+  id: r.id, productId: r.producto_id || null, name: r.nombre, qty: num(r.cantidad), price: num(r.precio), nota: r.nota || "",
+  estado: r.estado, motivo: r.motivo_anulacion || "", ventaId: r.venta_id || null, enviado: r.enviado_at || null, listo: r.listo_at || null,
+  usuario: r.usuario_nombre || "", createdAt: r.created_at,
+});
+export const COMANDA_SELECT = "*, comanda_items(*)";
+export const toComanda = r => ({
+  id: r.id, numero: Number(r.numero) || 0, tipo: r.tipo, estado: r.estado, mesaId: r.mesa_id || null, mesaNombre: r.mesa_nombre || "",
+  personas: r.personas ?? null, customerId: r.cliente_id || null, customerName: r.cliente_nombre || "", phone: r.cliente_telefono || "",
+  direccion: r.direccion || "", notas: r.notas || "", motivo: r.motivo_anulacion || "", mesero: r.mesero_nombre || "",
+  abierta: r.abierta_at, cerrada: r.cerrada_at || null, updatedAt: r.updated_at,
+  items: (r.comanda_items || []).map(toComandaItem).sort((a, b) => String(a.createdAt).localeCompare(String(b.createdAt))),
+});
+
 // ── Agenda y citas ─────────────────────────────────────────────────────────
 export const toCita = r => ({
   id: r.id, estado: r.estado, inicio: r.inicio, fin: r.fin, profesional: r.profesional || "", servicio: r.servicio || "",

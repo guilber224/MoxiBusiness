@@ -9,7 +9,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { supabase } from "../lib/supabaseClient";
 import * as api from "./api.js";
-import { PRODUCTO_COLS, toProduct, toCustomer, toExpense, toSale, toPresentacion, toCita } from "./mappers.js";
+import { PRODUCTO_COLS, toProduct, toCustomer, toExpense, toSale, toPresentacion, toCita, toMesa } from "./mappers.js";
 import { recordLocalChange, reconcileWithServer, resetLocalChanges } from "../utils/localChanges.js";
 import { DEFAULT_CATEGORY_ID } from "../categories.js";
 
@@ -17,7 +17,7 @@ const CACHE_VERSION = "v2";
 const cacheKey = eid => `moxi_${CACHE_VERSION}_${eid}`;
 export const VACIO = {
   config: { businessName: "", currency: "BOB", logo_url: null, qr_url: null }, products: [], categories: [], customers: [], sales: [], expenses: [], movements: [],
-  pedidos: [], suppliers: [], purchases: [], formulas: [], orders: [], users: [], activityLogs: [], caja: null, lotes: [], presentaciones: [], servicios: [], citas: [],
+  pedidos: [], suppliers: [], purchases: [], formulas: [], orders: [], users: [], activityLogs: [], caja: null, lotes: [], presentaciones: [], servicios: [], citas: [], mesas: [], comandas: [],
 };
 const leerCache = eid => { try { const v = JSON.parse(localStorage.getItem(cacheKey(eid))); return v && typeof v === "object" ? { ...VACIO, ...v } : null; } catch { return null; } };
 const escribirCache = (eid, data) => { try { localStorage.setItem(cacheKey(eid), JSON.stringify(data)); } catch { /* cuota llena: la app sigue funcionando sin caché */ } };
@@ -107,6 +107,11 @@ export function useMoxiData(user) {
   const refrescarLotes = useCallback(async () => {
     try { const l = await api.lotes.listar(); setData(d => ({ ...d, lotes: l })); } catch { /* se reintenta en la próxima carga */ }
   }, []);
+  const traerComanda = useCallback(async id => {
+    const c = await api.comandas.obtener(id);
+    mutar("comandas", cs => porId(cs, c));
+    return c;
+  }, [mutar]);
   const refrescarKardex = useCallback(async () => {
     try { const m = await api.inventario.kardex(); setData(d => ({ ...d, movements: m })); } catch { /* idem */ }
   }, []);
@@ -123,6 +128,11 @@ export function useMoxiData(user) {
         pendientes.delete(id);
         try { const v = await api.ventas.obtener(id); if (v?.id) mutar("sales", ss => porId(ss, v)); } catch { /* sin red */ }
       }, 400));
+    };
+    const releerComanda = id => {
+      const k = "comanda:" + id;
+      clearTimeout(pendientes.get(k));
+      pendientes.set(k, setTimeout(() => { pendientes.delete(k); traerComanda(id).catch(() => {}); }, 300));
     };
     const ch = supabase.channel(`moxi_v2_${eid}`)
       .on("postgres_changes", { event: "*", schema: "public", table: "productos", filter: f }, p => {
@@ -154,6 +164,19 @@ export function useMoxiData(user) {
       .on("postgres_changes", { event: "*", schema: "public", table: "ordenes_servicio", filter: f }, p => {
         if (p.new?.id) api.servicios.obtener(p.new.id).then(o => mutar("servicios", os => porId(os, o))).catch(() => {});
       })
+      .on("postgres_changes", { event: "*", schema: "public", table: "mesas", filter: f }, p => {
+        if (p.eventType === "DELETE" || p.new?.activo === false) mutar("mesas", ms => sinId(ms, p.old?.id || p.new?.id));
+        else if (p.new?.id) mutar("mesas", ms => porId(ms, toMesa(p.new)));
+      })
+      // Una comanda cambia con cada plato: se relee entera (con sus líneas), agrupando ráfagas
+      .on("postgres_changes", { event: "*", schema: "public", table: "comandas", filter: f }, p => {
+        if (p.eventType === "DELETE") { mutar("comandas", cs => sinId(cs, p.old?.id)); return; }
+        if (p.new?.id) releerComanda(p.new.id);
+      })
+      .on("postgres_changes", { event: "*", schema: "public", table: "comanda_items", filter: f }, p => {
+        const cid = p.new?.comanda_id || p.old?.comanda_id;
+        if (cid) releerComanda(cid);
+      })
       .on("postgres_changes", { event: "*", schema: "public", table: "citas", filter: f }, p => {
         if (p.eventType === "DELETE") mutar("citas", cs => sinId(cs, p.old?.id));
         else if (p.new?.id) mutar("citas", cs => porId(cs, toCita(p.new)));
@@ -161,7 +184,7 @@ export function useMoxiData(user) {
       .on("postgres_changes", { event: "*", schema: "public", table: "lotes", filter: f }, () => { clearTimeout(pendientes.get("lotes")); pendientes.set("lotes", setTimeout(refrescarLotes, 600)); })
       .subscribe();
     return () => { pendientes.forEach(clearTimeout); supabase.removeChannel(ch); };
-  }, [eid, mutar, refrescarCaja, refrescarLotes]);
+  }, [eid, mutar, refrescarCaja, refrescarLotes, traerComanda]);
 
   // ── Acciones ───────────────────────────────────────────────────────────────
   const acciones = useMemo(() => {
@@ -286,6 +309,27 @@ export function useMoxiData(user) {
       },
       cancelarServicio: async (id, motivo, devolver) => { const r = await api.servicios.cancelar(id, motivo, devolver); mutar("servicios", os => porId(os, r)); refrescarCaja(); return r; },
       eventosServicio: id => api.servicios.eventos(id),
+      // Mesas y comandas
+      guardarMesa: async m => { const r = await api.mesas.guardar(m); mutar("mesas", ms => porId(ms, r).sort((a, b) => a.orden - b.orden)); return r; },
+      eliminarMesa: async id => { await api.mesas.eliminar(id); mutar("mesas", ms => sinId(ms, id)); },
+      abrirComanda: async c => { const r = await api.comandas.abrir(c); return traerComanda(r.id); },
+      actualizarComanda: async (id, c) => { await api.comandas.actualizar(id, c); return traerComanda(id); },
+      agregarComanda: async (id, items) => { await api.comandas.agregar(id, items); return traerComanda(id); },
+      editarItemComanda: async (id, itemId, qty, nota) => { await api.comandas.editarItem(itemId, qty, nota); return traerComanda(id); },
+      quitarItemComanda: async (id, itemId, motivo) => { await api.comandas.quitarItem(itemId, motivo); return traerComanda(id); },
+      enviarComanda: async id => { const envio = await api.comandas.enviar(id); await traerComanda(id); return envio; },
+      estadoItemsComanda: async (id, estado, items) => { const n = await api.comandas.estadoItems(id, estado, items); await traerComanda(id); return n; },
+      moverComanda: async (id, mesaId) => { await api.comandas.mover(id, mesaId); return traerComanda(id); },
+      cobrarComanda: async (id, p) => {
+        const r = await api.comandas.cobrar(id, p);
+        const c = await traerComanda(id);
+        let sale = null;
+        if (r.venta?.id) { sale = await api.ventas.obtener(r.venta.id); if (sale?.id) mutar("sales", ss => porId(ss, sale)); }
+        refrescarProductos(c.items.filter(i => i.ventaId === r.venta?.id).map(i => i.productId).filter(Boolean)); refrescarCaja(); refrescarKardex();
+        return { comanda: c, venta: r.venta || null, sale };
+      },
+      liberarComanda: async id => { await api.comandas.liberar(id); return traerComanda(id); },
+      anularComanda: async (id, motivo) => { await api.comandas.anular(id, motivo); return traerComanda(id); },
       // Agenda
       guardarCita: async (c, forzar) => { const r = await api.citas.guardar(c, forzar); mutar("citas", cs => porId(cs, r)); if (!c.id && r.anticipo > 0) refrescarCaja(); return r; },
       estadoCita: async (id, estado) => { const r = await api.citas.estado(id, estado); mutar("citas", cs => porId(cs, r)); return r; },
@@ -305,7 +349,7 @@ export function useMoxiData(user) {
       completarOnboarding: async (completado = true) => { await api.empresa.onboarding(completado); setData(d => ({ ...d, config: { ...d.config, onboardingCompletado: completado } })); },
       setUsuarios: users => setData(d => ({ ...d, users })),
     };
-  }, [cargar, mutar, refrescarProductos, refrescarCaja, refrescarKardex, user?.id, user?.name]);
+  }, [cargar, mutar, refrescarProductos, refrescarCaja, refrescarKardex, traerComanda, user?.id, user?.name]);
 
   // Vista derivada para pantallas que esperan "inventory" separado
   const inventory = useMemo(() => data.products.map(p => ({ productId: p.id, stock: p.stock })), [data.products]);

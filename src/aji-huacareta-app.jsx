@@ -43,6 +43,7 @@ const Productos = lazyWithReload(() => import("./components/Productos.jsx").then
 const Inventario = lazyWithReload(() => import("./components/Inventario.jsx").then(m => ({ default: m.Inventario })));
 const Ventas = lazyWithReload(() => import("./components/Ventas.jsx").then(m => ({ default: m.Ventas })));
 const Pedidos = lazyWithReload(() => import("./components/Pedidos.jsx").then(m => ({ default: m.Pedidos })));
+const Mesas = lazyWithReload(() => import("./components/Mesas.jsx").then(m => ({ default: m.Mesas })));
 const Agenda = lazyWithReload(() => import("./components/Agenda.jsx").then(m => ({ default: m.Agenda })));
 const Servicios = lazyWithReload(() => import("./components/Servicios.jsx").then(m => ({ default: m.Servicios })));
 const Deudas = lazyWithReload(() => import("./components/Deudas.jsx").then(m => ({ default: m.Deudas })));
@@ -249,6 +250,7 @@ export default function App() {
                 {seccion("pedidos", <Pedidos {...props} />)}
                 {seccion("servicios", <Servicios {...props} />)}
                 {seccion("agenda", <Agenda {...props} />)}
+                {seccion("mesas", <Mesas {...props} />)}
                 {seccion("deudas", <Deudas {...props} />)}
                 {seccion("productos", <Productos {...props} />)}
                 {seccion("inventario", <Inventario {...props} />)}

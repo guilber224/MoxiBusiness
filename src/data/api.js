@@ -3,7 +3,7 @@
 // mensaje en español listo para mostrar al usuario.
 import { supabase } from "../lib/supabaseClient";
 import {
-  PRODUCTO_COLS, LOTE_COLS, toLote, toOrdenServicio, toCita, PRESENTACION_COLS, toPresentacion, CLIENTE_COLS, VENTA_SELECT, GASTO_COLS, MOV_COLS, COMPRA_SELECT, EMPRESA_COLS,
+  PRODUCTO_COLS, LOTE_COLS, toLote, toOrdenServicio, toCita, toMesa, toComanda, COMANDA_SELECT, PRESENTACION_COLS, toPresentacion, CLIENTE_COLS, VENTA_SELECT, GASTO_COLS, MOV_COLS, COMPRA_SELECT, EMPRESA_COLS,
   toProduct, toCategory, toCustomer, toSale, toExpense, toMovement, toSupplier, toPurchase,
   toFormula, toOrder, toConfig, toUser, toActivity,
   fromProduct, fromCustomer, fromExpense, fromSupplier, fromFormula, fromConfig,
@@ -26,6 +26,7 @@ export const mensajeError = (e) => {
 const ok = ({ data, error }) => { if (error) throw new ApiError(mensajeError(error)); return data; };
 const rpc = async (fn, args) => ok(await supabase.rpc(fn, args));
 
+const inicioDeHoy = () => { const d = new Date(); d.setHours(0, 0, 0, 0); return d.toISOString(); };
 const desdeMeses = (m) => { const d = new Date(); d.setMonth(d.getMonth() - m); return d.toISOString(); };
 
 // ── Carga completa (en paralelo; cada parte falla de forma independiente) ────
@@ -65,6 +66,9 @@ export async function cargarTodo(empresaId) {
     servicios:  supabase.from("ordenes_servicio").select("*").or(`estado.not.in.(ENTREGADO,CANCELADO),created_at.gte."${desdeMeses(12)}"`).order("created_at", { ascending: false }).limit(1000),
     // Citas de los últimos 2 meses y todas las futuras (las más antiguas se piden al navegar)
     citas:      todasLasFilas(t => supabase.from("citas").select("*", t ? { count: "exact" } : undefined).gte("inicio", desdeMeses(2)).order("inicio").order("id")),
+    mesas:      supabase.from("mesas").select("*").eq("activo", true).order("orden").order("nombre").limit(500),
+    // Comandas abiertas y las de hoy (las cerradas antiguas ya están en Ventas)
+    comandas:   supabase.from("comandas").select(COMANDA_SELECT).or(`estado.eq.ABIERTA,abierta_at.gte."${inicioDeHoy()}"`).order("abierta_at", { ascending: false }).limit(500),
     lotes:      todasLasFilas(t => supabase.from("lotes").select(LOTE_COLS, t ? { count: "exact" } : undefined).gt("cantidad", 0).order("vencimiento", { ascending: true, nullsFirst: false }).order("id")),
   };
   const mapeo = {
@@ -72,7 +76,7 @@ export async function cargarTodo(empresaId) {
     customers: rs => rs.map(toCustomer), sales: rs => rs.map(toSale), expenses: rs => rs.map(toExpense),
     movements: rs => rs.map(toMovement), pedidos: rs => rs, suppliers: rs => rs.map(toSupplier),
     purchases: rs => rs.map(toPurchase), formulas: rs => rs.map(toFormula), orders: rs => rs.map(toOrder),
-    users: rs => rs.map(toUser), activityLogs: rs => rs.map(toActivity), caja: r => r || null, lotes: rs => rs.map(toLote), servicios: rs => rs.map(toOrdenServicio), citas: rs => rs.map(toCita), presentaciones: rs => rs.map(toPresentacion),
+    users: rs => rs.map(toUser), activityLogs: rs => rs.map(toActivity), caja: r => r || null, lotes: rs => rs.map(toLote), servicios: rs => rs.map(toOrdenServicio), citas: rs => rs.map(toCita), mesas: rs => rs.map(toMesa), comandas: rs => rs.map(toComanda), presentaciones: rs => rs.map(toPresentacion),
   };
   const keys = Object.keys(q);
   const results = await Promise.allSettled(keys.map(k => q[k]));
@@ -190,6 +194,33 @@ export const servicios = {
   async estado(id, estado, nota) { return toOrdenServicio(await rpc("servicio_estado", { p_id: id, p_estado: estado, p_nota: nota || null })); },
   async entregar(id, pagos) { const r = await rpc("servicio_entregar", { p_id: id, p_pagos: (pagos || []).map(x => ({ monto: Number(x.amount), metodo: x.method })) }); return { orden: toOrdenServicio(r), venta: r.venta || null }; },
   async cancelar(id, motivo, devolver) { return toOrdenServicio(await rpc("servicio_cancelar", { p_id: id, p_motivo: motivo, p_devolver_anticipo: !!devolver })); },
+};
+
+// Mesas y comandas: todas las escrituras pasan por funciones del servidor
+export const mesas = {
+  async guardar(m) { return toMesa(await rpc("mesa_guardar", { p: { id: m.id || null, nombre: m.name, zona: m.zona, capacidad: m.capacidad || null, orden: m.orden ?? null } })); },
+  async eliminar(id) { await rpc("mesa_eliminar", { p_id: id }); },
+};
+export const comandas = {
+  async obtener(id) { return toComanda(ok(await supabase.from("comandas").select(COMANDA_SELECT).eq("id", id).single())); },
+  async abrir(c) {
+    return rpc("comanda_abrir", { p: { tipo: c.tipo, mesa_id: c.mesaId || null, personas: c.personas || null, cliente_id: c.customerId || null,
+      cliente_nombre: c.customerName, cliente_telefono: c.phone, direccion: c.direccion, notas: c.notas } });
+  },
+  actualizar: (id, c) => rpc("comanda_actualizar", { p_id: id, p: c }),
+  agregar: (id, items) => rpc("comanda_agregar", { p_id: id, p_items: items.map(i => ({ producto_id: i.productId || null, nombre: i.name, cantidad: Number(i.qty), precio: i.price === undefined || i.price === null || i.price === "" ? null : Number(i.price), nota: i.nota || null })) }),
+  editarItem: (itemId, qty, nota) => rpc("comanda_item_editar", { p_item: itemId, p_cantidad: Number(qty), p_nota: nota || null }),
+  quitarItem: (itemId, motivo) => rpc("comanda_item_quitar", { p_item: itemId, p_motivo: motivo || null }),
+  enviar: id => rpc("comanda_enviar", { p_id: id }),
+  estadoItems: (id, estado, items) => rpc("comanda_items_estado", { p_id: id, p_estado: estado, p_items: items?.length ? items : null }),
+  mover: (id, mesaId) => rpc("comanda_mover", { p_id: id, p_mesa: mesaId }),
+  cobrar: (id, p) => rpc("comanda_cobrar", { p_id: id, p: {
+    items: p.items?.length ? p.items : null, cliente_id: p.customerId || null, cliente_nombre: p.customerName || null,
+    descuento: Number(p.discount) || 0, descuento_tipo: p.discountType === "pct" ? "pct" : "monto",
+    pagos: (p.pagos || []).filter(x => Number(x.amount) > 0).map(x => ({ monto: Number(x.amount), metodo: x.method })),
+  } }),
+  liberar: id => rpc("comanda_liberar", { p_id: id }),
+  anular: (id, motivo) => rpc("comanda_anular", { p_id: id, p_motivo: motivo || null }),
 };
 
 // Agenda: todas las escrituras pasan por funciones del servidor

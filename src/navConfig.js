@@ -1,6 +1,6 @@
 import {
   LayoutDashboard, Users, ShoppingCart, ClipboardList, CreditCard, Package,
-  Archive, Factory, Truck, Wallet, TrendingDown, BarChart2, Download, Settings, Shield, Wrench, CalendarDays,
+  Archive, Factory, Truck, Wallet, TrendingDown, BarChart2, Download, Settings, Shield, Wrench, CalendarDays, UtensilsCrossed,
 } from "lucide-react";
 
 // ╔══════════════════════════════════════════════════════════════════════╗
@@ -8,7 +8,7 @@ import {
 // ╚══════════════════════════════════════════════════════════════════════╝
 export const NAV_GROUPS = [
   { label:"General",   items:[{id:"dashboard",label:"Panel Principal"}] },
-  { label:"Comercial", items:[{id:"clientes",label:"Clientes"},{id:"ventas",label:"Ventas"},{id:"pedidos",label:"Pedidos"},{id:"agenda",label:"Agenda"},{id:"servicios",label:"Servicio técnico"},{id:"gastos",label:"Gastos"},{id:"deudas",label:"Deudas"}] },
+  { label:"Comercial", items:[{id:"clientes",label:"Clientes"},{id:"ventas",label:"Ventas"},{id:"pedidos",label:"Pedidos"},{id:"mesas",label:"Mesas y comandas"},{id:"agenda",label:"Agenda"},{id:"servicios",label:"Servicio técnico"},{id:"gastos",label:"Gastos"},{id:"deudas",label:"Deudas"}] },
   { label:"Operaciones",items:[{id:"productos",label:"Productos"},{id:"inventario",label:"Inventario"},{id:"produccion",label:"Producción"},{id:"proveedores",label:"Proveedores"}] },
   { label:"Finanzas",  items:[{id:"caja",label:"Flujo de Caja"},{id:"analisis",label:"Análisis"},{id:"exportar",label:"Exportar Datos"}] },
   { label:"Administración", items:[{id:"usuarios",label:"Ajustes"}] },
@@ -23,11 +23,11 @@ export const ROLE_OPTIONS = [
 ];
 export const ROLE_LABELS = Object.fromEntries(ROLE_OPTIONS.map(role => [role.id, role.label]));
 export const ROLES = {
-  admin:      ["dashboard","clientes","ventas","pedidos","agenda","servicios","deudas","productos","inventario","produccion","proveedores","caja","gastos","analisis","exportar","usuarios"],
-  vendedor:   ["dashboard","clientes","ventas","pedidos","agenda","servicios","deudas","caja","gastos"],
-  operador:   ["dashboard","productos","inventario","produccion","agenda","servicios"],
+  admin:      ["dashboard","clientes","ventas","pedidos","mesas","agenda","servicios","deudas","productos","inventario","produccion","proveedores","caja","gastos","analisis","exportar","usuarios"],
+  vendedor:   ["dashboard","clientes","ventas","pedidos","mesas","agenda","servicios","deudas","caja","gastos"],
+  operador:   ["dashboard","productos","inventario","produccion","mesas","agenda","servicios"],
   usuario:    ["ventas"],
-  superadmin: ["dashboard","clientes","ventas","pedidos","agenda","servicios","deudas","productos","inventario","produccion","proveedores","caja","gastos","analisis","exportar","usuarios","superadmin"],
+  superadmin: ["dashboard","clientes","ventas","pedidos","mesas","agenda","servicios","deudas","productos","inventario","produccion","proveedores","caja","gastos","analisis","exportar","usuarios","superadmin"],
 };
 
 // Lucide icon components mapped by nav id
@@ -35,6 +35,7 @@ export const NAV_ICONS = {
   dashboard:   LayoutDashboard,
   servicios:   Wrench,
   agenda:      CalendarDays,
+  mesas:       UtensilsCrossed,
   clientes:    Users,
   ventas:      ShoppingCart,
   pedidos:     ClipboardList,

@@ -15,6 +15,7 @@ const MODULOS = [
   ["produccion", "Producción", "Fórmulas y órdenes de producción."],
   ["servicios", "Servicio técnico", "Todas las órdenes de servicio y su historial. Las ventas que generaron se conservan."],
   ["agenda", "Agenda y citas", "Todas las citas. Las ventas que generaron se conservan."],
+  ["mesas", "Comandas", "Todas las comandas de mesas y para llevar. Las mesas configuradas y las ventas se conservan."],
   ["actividad", "Registro de actividad", "El historial de quién hizo qué."],
 ];
 
