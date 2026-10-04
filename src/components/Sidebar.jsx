@@ -1,10 +1,10 @@
-import { ChevronLeft, LogOut, LayoutDashboard } from "lucide-react";
+import { ChevronLeft, LogOut, LayoutDashboard, Lock } from "lucide-react";
 import { BRAND_NAME, FONT, safeBusinessName } from "../theme.jsx";
 import { useIsMobile } from "../hooks/useIsMobile.js";
 import { NAV_GROUPS, NAV_ICONS, ROLES, ROLE_LABELS } from "../navConfig.js";
 import { BrandLogo } from "./ui/BrandLogo.jsx";
 
-export function Sidebar({ tab, setTab, user, onLogout, config, open, onClose, collapsed, onToggleCollapse }) {
+export function Sidebar({ tab, setTab, user, onLogout, config, open, onClose, collapsed, onToggleCollapse, bloqueados = [] }) {
   const isMobile = useIsMobile();
   const allowed = ROLES[user.role] || [];
   const businessName = safeBusinessName(config);
@@ -99,7 +99,7 @@ export function Sidebar({ tab, setTab, user, onLogout, config, open, onClose, co
                   if (isCollapsed) {
                     return (
                       <div key={item.id} className="nav-item-wrap" style={{position:"relative",marginBottom:2}}>
-                        <button onClick={() => handleSetTab(item.id)} title={item.label}
+                        <button onClick={() => handleSetTab(item.id)} title={bloqueados.includes(item.id) ? item.label + " (no incluido en tu plan)" : item.label} aria-label={item.label}
                           style={{
                             display:"flex",alignItems:"center",justifyContent:"center",width:"100%",height:40,
                             border:"none",cursor:"pointer",fontFamily:FONT,
@@ -133,6 +133,7 @@ export function Sidebar({ tab, setTab, user, onLogout, config, open, onClose, co
                     >
                       <Icon size={18} strokeWidth={1.8} style={{flexShrink:0,opacity:active?1:0.7}} />
                       <span style={{whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{item.label}</span>
+                      {bloqueados.includes(item.id) && <Lock size={13} strokeWidth={2} aria-label="No incluido en tu plan" style={{marginLeft:"auto",flexShrink:0,opacity:0.6}} />}
                     </button>
                   );
                 })}

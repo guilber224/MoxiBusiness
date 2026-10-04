@@ -5,7 +5,7 @@ import { comprimirImagen, mensajeError } from "../data/api.js";
 // Las reglas viven en el servidor (migración 09): aquí solo se llaman.
 
 const ok = ({ data, error }) => { if (error) throw new Error(mensajeError(error)); return data; };
-const PLAN_COLS = "id,codigo,nombre,descripcion,precio_mensual,precio_anual,max_usuarios,caracteristicas,destacado,activo,orden";
+const PLAN_COLS = "id,codigo,nombre,descripcion,precio_mensual,precio_anual,max_usuarios,modulos,caracteristicas,destacado,activo,orden";
 const COBRO_COLS = "pago_qr_url,pago_banco,pago_titular,pago_cuenta,pago_instrucciones,whatsapp_soporte,trial_dias";
 
 export const MESES_OPCIONES = [1, 3, 6, 12];
@@ -14,6 +14,9 @@ export const montoPlan = (plan, meses) =>
   meses === 12 && plan?.precio_anual != null ? Number(plan.precio_anual) : Number(plan?.precio_mensual || 0) * meses;
 
 export const cobrosService = {
+  // ── Mi plan: módulos, límite de usuarios y vigencia (calculado en el servidor) ──
+  async miPlan() { return ok(await supabase.rpc("mi_plan")); },
+
   // ── Planes ──
   async planes() {
     return ok(await supabase.from("planes").select(PLAN_COLS).order("orden").order("precio_mensual"));
@@ -25,6 +28,7 @@ export const cobrosService = {
       precio_anual: plan.precio_anual === "" || plan.precio_anual == null ? null : Number(plan.precio_anual),
       max_usuarios: plan.max_usuarios === "" || plan.max_usuarios == null ? null : Number(plan.max_usuarios),
       caracteristicas: (plan.caracteristicas || []).map(s => s.trim()).filter(Boolean),
+      modulos: Array.isArray(plan.modulos) ? plan.modulos : null,
       destacado: !!plan.destacado, activo: !!plan.activo, orden: Number(plan.orden) || 0, updated_at: new Date().toISOString(),
     };
     const q = plan.id ? supabase.from("planes").update(fila).eq("id", plan.id) : supabase.from("planes").insert(fila);
@@ -77,3 +81,5 @@ export const cobrosService = {
     return ok(await supabase.storage.from("comprobantes").createSignedUrl(path, 600)).signedUrl;
   },
 };
+
+export { MODULOS_PLAN, SIEMPRE_INCLUIDOS, planIncluye } from "../utils/planes.js";

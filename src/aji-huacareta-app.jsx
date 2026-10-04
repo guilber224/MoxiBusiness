@@ -14,6 +14,8 @@ import { Sidebar } from "./components/Sidebar.jsx";
 import { Topbar } from "./components/Topbar.jsx";
 import { SuscripcionVencida } from "./screens/SuscripcionVencida.jsx";
 import { suscripcionService } from "./services/suscripcionService.js";
+import { cobrosService, planIncluye } from "./services/cobrosService.js";
+import { PlanBloqueado } from "./components/PlanBloqueado.jsx";
 import { useMoxiData } from "./data/useMoxiData.js";
 import { EstadoDatos } from "./components/ui/EstadoDatos.jsx";
 
@@ -66,6 +68,7 @@ export default function App() {
   const [sessionChecked, setSessionChecked] = useState(false);
   const [isRestoringSession, setIsRestoringSession] = useState(false);
   const [suscripcion, setSuscripcion] = useState(null);
+  const [miPlan, setMiPlan] = useState(null); // módulos y límite de usuarios del plan (servidor)
   const [waConfig, setWaConfig] = useState("+59163506018");
   // Una vez visitada, cada sección queda montada (oculta): volver a ella es instantáneo.
   const [mountedTabs, setMountedTabs] = useState(() => new Set(["dashboard"]));
@@ -96,10 +99,11 @@ export default function App() {
   // Suscripción (el servidor crea el periodo de prueba si no existe)
   const recargarSuscripcion = useCallback(() => {
     suscripcionService.getOCrearTrial().then(setSuscripcion).catch(() => {});
+    cobrosService.miPlan().then(setMiPlan).catch(() => {});
   }, []);
   useEffect(() => {
     if (!user?.empresa_id || user?.role === "superadmin") return;
-    suscripcionService.getOCrearTrial().then(setSuscripcion).catch(() => {});
+    suscripcionService.getOCrearTrial().then(s => { setSuscripcion(s); cobrosService.miPlan().then(setMiPlan).catch(() => {}); }).catch(() => {});
     suscripcionService.getConfig().then(cfg => setWaConfig(cfg.whatsapp_soporte || "+59163506018")).catch(() => {});
   }, [user?.empresa_id, user?.role]);
 
@@ -138,6 +142,8 @@ export default function App() {
   }, [loginUser]);
 
   const allowedTabs = useMemo(() => ROLES[user?.role] || [], [user?.role]);
+  // Secciones que el rol permite pero el plan no incluye: se ven con candado
+  const bloqueados = useMemo(() => (user?.role === "superadmin" ? [] : allowedTabs.filter(t => !planIncluye(miPlan, t))), [allowedTabs, miPlan, user?.role]);
   useEffect(() => {
     if (user && allowedTabs.length && !allowedTabs.includes(tab)) setTab(allowedTabs[0]);
   }, [user, tab, allowedTabs]);
@@ -175,7 +181,9 @@ export default function App() {
   const dias = suscripcion ? suscripcionService.diasRestantes(suscripcion) : null;
   const props = { D: data, A: acciones, user, estado, setTab };
   const seccion = (id, el) => mountedTabs.has(id) && allowedTabs.includes(id) && (
-    <div style={{ display: tab === id ? "" : "none" }}>{el}</div>
+    <div style={{ display: tab === id ? "" : "none" }}>
+      {bloqueados.includes(id) ? <PlanBloqueado modulo={id} plan={miPlan} user={user} onMejorar={() => setTab("usuarios")} /> : el}
+    </div>
   );
 
   return (
@@ -184,7 +192,7 @@ export default function App() {
       <div style={{ display: "flex", height: "100vh", fontFamily: FONT, background: "var(--color-bg-primary)", fontSize: 14, color: "var(--color-text)", overflow: "hidden" }}>
         {(!isMobile || sidebarOpen) && (
           <Sidebar
-            tab={tab} setTab={setTab} user={user} config={data.config}
+            tab={tab} setTab={setTab} user={user} config={data.config} bloqueados={bloqueados}
             onLogout={handleLogout} open={sidebarOpen} onClose={() => setSidebarOpen(false)}
             collapsed={isMobile ? false : sidebarCollapsed} onToggleCollapse={() => setSidebarCollapsed(v => !v)}
           />
@@ -222,7 +230,7 @@ export default function App() {
                 {seccion("gastos", <GastosPage {...props} />)}
                 {seccion("analisis", <Analisis {...props} />)}
                 {seccion("exportar", <Exportar {...props} />)}
-                {seccion("usuarios", <UsuariosAdmin {...props} suscripcion={suscripcion} onSuscripcion={recargarSuscripcion} onProfileUpdate={name => setUser(u => ({ ...u, name }))} />)}
+                {seccion("usuarios", <UsuariosAdmin {...props} suscripcion={suscripcion} miPlan={miPlan} onSuscripcion={recargarSuscripcion} onProfileUpdate={name => setUser(u => ({ ...u, name }))} />)}
                 {seccion("superadmin", <SuperAdminPanel {...props} />)}
               </Suspense>
             </div>

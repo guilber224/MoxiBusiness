@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 import toast from "react-hot-toast";
 import { supabase } from "../lib/supabaseClient.js";
-import { cobrosService } from "../services/cobrosService.js";
+import { cobrosService, MODULOS_PLAN } from "../services/cobrosService.js";
 import { bob, PagarSuscripcion } from "./PagarSuscripcion.jsx";
 import { fDate, fDateTime } from "../utils/businessLogic.js";
 import { C } from "../theme.jsx";
@@ -9,7 +9,7 @@ import { card, lbl, inp, mkBtn, mkBadge } from "../styles.js";
 import { Modal } from "./ui/Modal.jsx";
 
 const MESES_TXT = m => (m === 12 ? "1 año" : `${m} ${m === 1 ? "mes" : "meses"}`);
-const PLAN_VACIO = { codigo: "", nombre: "", descripcion: "", precio_mensual: "", precio_anual: "", max_usuarios: "", caracteristicas: [], destacado: false, activo: true, orden: 0 };
+const PLAN_VACIO = { codigo: "", nombre: "", descripcion: "", precio_mensual: "", precio_anual: "", max_usuarios: "", caracteristicas: [], modulos: null, destacado: false, activo: true, orden: 0 };
 
 /** Panel del dueño de la plataforma: pagos por revisar, planes y datos de cobro. */
 export function SuperAdminCobros({ onCambio, user }) {
@@ -130,7 +130,7 @@ export function SuperAdminCobros({ onCambio, user }) {
           <div key={p.id} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 10, padding: "10px 0", borderTop: `1px solid ${C.border}`, flexWrap: "wrap" }}>
             <div style={{ fontSize: 13 }}>
               <strong>{p.nombre}</strong> {p.destacado && <span style={mkBadge("blue")}>Recomendado</span>} <span style={mkBadge(p.activo ? "green" : "gray")}>{p.activo ? "Publicado" : "Oculto"}</span>
-              <div style={{ color: C.textFaint, fontSize: 12 }}>{bob(p.precio_mensual)}/mes{p.precio_anual != null ? ` · ${bob(p.precio_anual)}/año` : ""} · {p.max_usuarios ? `${p.max_usuarios} usuario(s)` : "usuarios ilimitados"}</div>
+              <div style={{ color: C.textFaint, fontSize: 12 }}>{bob(p.precio_mensual)}/mes{p.precio_anual != null ? ` · ${bob(p.precio_anual)}/año` : ""} · {p.max_usuarios ? `${p.max_usuarios} usuario(s)` : "usuarios ilimitados"} · {Array.isArray(p.modulos) ? `${p.modulos.length} secciones` : "todas las secciones"}</div>
             </div>
             <div style={{ display: "flex", gap: 6 }}>
               <button onClick={() => alternarPlan(p)} style={mkBtn(p.activo ? "ghost" : "success")}>{p.activo ? "Ocultar" : "Publicar"}</button>
@@ -203,7 +203,19 @@ export function SuperAdminCobros({ onCambio, user }) {
         </div>
         <label style={{ ...lbl, marginTop: 10 }}>Descripción corta</label>
         <input style={inp} value={planForm.descripcion || ""} onChange={e => setPlanForm({ ...planForm, descripcion: e.target.value })} placeholder="Ej: Para tiendas con equipo de trabajo" />
-        <label style={{ ...lbl, marginTop: 10 }}>Características (una por línea)</label>
+        <label style={{ ...lbl, marginTop: 10 }}>Secciones incluidas</label>
+        <label style={{ display: "flex", gap: 6, alignItems: "center", fontSize: 13, cursor: "pointer", marginBottom: 6 }}>
+          <input type="checkbox" checked={!Array.isArray(planForm.modulos)} onChange={e => setPlanForm({ ...planForm, modulos: e.target.checked ? null : MODULOS_PLAN.map(([id]) => id) })} /> <strong>Todas</strong> (incluye las que agreguemos en el futuro)
+        </label>
+        {Array.isArray(planForm.modulos) && <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill,minmax(170px,1fr))", gap: 4, padding: 10, background: "var(--color-bg-primary)", borderRadius: 8 }}>
+          {MODULOS_PLAN.map(([id, nombre]) => (
+            <label key={id} style={{ display: "flex", gap: 6, alignItems: "center", fontSize: 12.5, cursor: "pointer" }}>
+              <input type="checkbox" checked={planForm.modulos.includes(id)} onChange={e => setPlanForm({ ...planForm, modulos: e.target.checked ? [...planForm.modulos, id] : planForm.modulos.filter(x => x !== id) })} /> {nombre}
+            </label>
+          ))}
+        </div>}
+        <div style={{ fontSize: 11, color: C.textFaint, marginTop: 4 }}>Panel principal y Ajustes van siempre. Las secciones no incluidas se ven con candado y el servidor bloquea su uso.</div>
+        <label style={{ ...lbl, marginTop: 10 }}>Características (una por línea, se muestran en /precios)</label>
         <textarea style={{ ...inp, minHeight: 110, resize: "vertical" }} value={caracTxt} onChange={e => setCaracTxt(e.target.value)} />
         <div style={{ display: "flex", gap: 16, marginTop: 10, fontSize: 13 }}>
           <label style={{ display: "flex", gap: 6, alignItems: "center", cursor: "pointer" }}><input type="checkbox" checked={!!planForm.activo} onChange={e => setPlanForm({ ...planForm, activo: e.target.checked })} /> Publicado</label>

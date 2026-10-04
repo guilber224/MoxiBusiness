@@ -13,6 +13,7 @@ import { Empty } from "./ui/Empty.jsx";
 import { Modal } from "./ui/Modal.jsx";
 import { Table } from "./ui/Table.jsx";
 import { PagarSuscripcion } from "./PagarSuscripcion.jsx";
+import { planIncluye } from "../services/cobrosService.js";
 
 const ROLES = [
   { id: "admin", label: "Administrador", desc: "Acceso total, incluida la configuración y el equipo" },
@@ -58,7 +59,7 @@ function ImagenEmpresa({ titulo, ayuda, url, nombre, campo, A, puedeEditar }) {
   );
 }
 
-export function UsuariosAdmin({ D, A, user, onProfileUpdate, suscripcion, onSuscripcion }) {
+export function UsuariosAdmin({ D, A, user, onProfileUpdate, suscripcion, onSuscripcion, miPlan }) {
   const [verSuscripcion, setVerSuscripcion] = useState(false);
   const { users, config, activityLogs } = D;
   const admin = isAdmin(user) || user?.role === "superadmin";
@@ -128,10 +129,15 @@ export function UsuariosAdmin({ D, A, user, onProfileUpdate, suscripcion, onSusc
   }, { exito: u.active ? "Usuario desactivado" : "Usuario reactivado" });
 
   const equipo = users.map(u => ({ ...u, active: u.active ?? u.activo ?? true }));
+  // Límite de usuarios del plan (el servidor lo hace cumplir; aquí solo se avisa)
+  const maxUsuarios = user.role === "superadmin" ? null : miPlan?.max_usuarios ?? null;
+  const activos = equipo.filter(u => u.active).length;
+  const enLimite = maxUsuarios != null && activos >= maxUsuarios;
+  const verActividad = user.role === "superadmin" || planIncluye(miPlan, "actividad");
 
   return (
     <div>
-      <Header title="Ajustes" sub="Tu perfil, la empresa y el equipo" action={admin && <button onClick={() => { setErr(""); setForm(FORM_VACIO); setModal(true); }} style={mkBtn("primary")}>+ Nuevo usuario</button>} />
+      <Header title="Ajustes" sub="Tu perfil, la empresa y el equipo" action={admin && <button onClick={() => { if (enLimite) { setVerSuscripcion(true); return; } setErr(""); setForm(FORM_VACIO); setModal(true); }} title={enLimite ? "Llegaste al límite de usuarios de tu plan" : undefined} style={mkBtn(enLimite ? "ghost" : "primary")}>{enLimite ? "🔒 Nuevo usuario" : "+ Nuevo usuario"}</button>} />
 
       {user.role !== "superadmin" && suscripcion && <div style={{ ...card(), marginBottom: 14 }}>
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
@@ -182,7 +188,11 @@ export function UsuariosAdmin({ D, A, user, onProfileUpdate, suscripcion, onSusc
       <ImagenEmpresa titulo="QR de cobro" nombre="qr" campo="qr_url" url={config.qr_url} A={A} puedeEditar={admin} ayuda="Se muestra en el punto de venta cuando el cliente paga por QR." />
 
       <div style={card()}>
-        <div style={{ fontWeight: 700, fontSize: 13, marginBottom: 12 }}>Equipo</div>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8, marginBottom: 12, flexWrap: "wrap" }}>
+          <div style={{ fontWeight: 700, fontSize: 13 }}>Equipo</div>
+          {maxUsuarios != null && <span style={mkBadge(enLimite ? "amber" : "gray")}>{activos} de {maxUsuarios} usuario{maxUsuarios === 1 ? "" : "s"} · plan {miPlan?.plan_nombre}</span>}
+        </div>
+        {enLimite && admin && <div style={{ fontSize: 12, color: C.textMid, background: "rgba(245,158,11,0.10)", borderRadius: 8, padding: "8px 10px", marginBottom: 10 }}>Llegaste al límite de usuarios de tu plan. Para agregar más, <button onClick={() => setVerSuscripcion(true)} style={{ background: "none", border: "none", padding: 0, color: "#111E7B", fontWeight: 700, cursor: "pointer", textDecoration: "underline", fontFamily: "inherit", fontSize: 12 }}>mejora tu plan</button> o desactiva a alguien.</div>}
         {equipo.length === 0 ? <Empty icon="🛡️" title="Sin usuarios" sub="Crea la primera cuenta de tu equipo" /> :
           <Table cols={[
             { key: "name", label: "Nombre", style: { fontWeight: 600 }, render: (v, r) => <>{v}{r.id === user.id && <span style={{ ...mkBadge("blue"), marginLeft: 6 }}>Tú</span>}</> },
@@ -197,7 +207,8 @@ export function UsuariosAdmin({ D, A, user, onProfileUpdate, suscripcion, onSusc
           ]} rows={equipo} />}
       </div>
 
-      {admin && <div style={{ ...card(), marginTop: 14 }}>
+      {admin && !verActividad && <div style={{ ...card(), marginTop: 14, fontSize: 13, color: C.textMid }}>🔒 <strong>Registro de actividad</strong>: ve quién vendió, cobró o anuló cada cosa. Disponible desde el plan Negocio.</div>}
+      {admin && verActividad && <div style={{ ...card(), marginTop: 14 }}>
         <div style={{ fontWeight: 700, fontSize: 13, marginBottom: 12 }}>Registro de actividad</div>
         {(activityLogs || []).length === 0 ? <Empty icon="🧾" title="Sin actividad registrada" sub="Ventas, cobros, anulaciones y cambios importantes aparecerán aquí." /> :
           <Table cols={[
