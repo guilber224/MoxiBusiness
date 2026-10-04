@@ -1,0 +1,13 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 460 360" role="img" aria-label="Moxi Business">
+  <defs>
+    <linearGradient id="m" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#DCE6EF" /><stop offset="38%" stop-color="#8FA3B6" /><stop offset="100%" stop-color="#4B5F72" />
+    </linearGradient>
+    <linearGradient id="a" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#93C5FD" /><stop offset="100%" stop-color="#1E3A8A" />
+    </linearGradient>
+  </defs>
+  <path d="M54 254 156 58l74 146 74-146 102 196-92-45-40-76-38 75h-12l-38-75-39 76Z" fill="url(#m)" stroke="#5B7287" stroke-width="10" stroke-linejoin="round" />
+  <path d="M30 308c118-70 281-70 398 0-118-26-281-26-398 0Z" fill="url(#a)" opacity="0.18" />
+  <path d="M18 312c127-92 297-92 424 0-122-47-297-47-424 0Z" fill="url(#m)" stroke="#516578" stroke-width="10" stroke-linejoin="round" />
+</svg>

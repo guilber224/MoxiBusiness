@@ -12,6 +12,7 @@ import { Header } from "./ui/Header.jsx";
 import { Empty } from "./ui/Empty.jsx";
 import { Modal } from "./ui/Modal.jsx";
 import { Table } from "./ui/Table.jsx";
+import { PagarSuscripcion } from "./PagarSuscripcion.jsx";
 
 const ROLES = [
   { id: "admin", label: "Administrador", desc: "Acceso total, incluida la configuración y el equipo" },
@@ -57,7 +58,8 @@ function ImagenEmpresa({ titulo, ayuda, url, nombre, campo, A, puedeEditar }) {
   );
 }
 
-export function UsuariosAdmin({ D, A, user, onProfileUpdate }) {
+export function UsuariosAdmin({ D, A, user, onProfileUpdate, suscripcion, onSuscripcion }) {
+  const [verSuscripcion, setVerSuscripcion] = useState(false);
   const { users, config, activityLogs } = D;
   const admin = isAdmin(user) || user?.role === "superadmin";
   const [ejecutar, guardando] = useAccion();
@@ -130,6 +132,17 @@ export function UsuariosAdmin({ D, A, user, onProfileUpdate }) {
   return (
     <div>
       <Header title="Ajustes" sub="Tu perfil, la empresa y el equipo" action={admin && <button onClick={() => { setErr(""); setForm(FORM_VACIO); setModal(true); }} style={mkBtn("primary")}>+ Nuevo usuario</button>} />
+
+      {user.role !== "superadmin" && suscripcion && <div style={{ ...card(), marginBottom: 14 }}>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
+          <div>
+            <div style={{ fontWeight: 700, fontSize: 13 }}>Suscripción</div>
+            <div style={{ fontSize: 12, color: C.textFaint, marginTop: 2 }}>{suscripcion.plan === "trial" ? "Prueba gratuita" : "Plan " + suscripcion.plan} · vigente hasta {fDate(suscripcion.vence_el)}</div>
+          </div>
+          <button onClick={() => setVerSuscripcion(v => !v)} style={mkBtn(verSuscripcion ? "ghost" : "primary")}>{verSuscripcion ? "Ocultar" : admin ? "Renovar o cambiar plan" : "Ver detalle"}</button>
+        </div>
+        {verSuscripcion && <div style={{ marginTop: 14 }}><PagarSuscripcion user={user} suscripcion={suscripcion} onActualizado={onSuscripcion} /></div>}
+      </div>}
 
       <div style={{ ...card(), marginBottom: 14 }}>
         <div style={{ fontWeight: 700, fontSize: 13, marginBottom: 12 }}>Mi perfil</div>

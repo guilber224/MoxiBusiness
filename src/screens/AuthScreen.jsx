@@ -7,7 +7,7 @@ import { inp, lbl, row, mkBtn } from "../styles.js";
 import { BrandLogo } from "../components/ui/BrandLogo.jsx";
 
 export function AuthScreen({ config, onLogin, saveConfig }) {
-  const [mode, setMode] = useState("login"); // "login" | "register" | "forgot"
+  const [mode, setMode] = useState(() => { try { return new URLSearchParams(window.location.search).has("registro") ? "register" : "login"; } catch { return "login"; } }); // "login" | "register" | "forgot"
   const [loginForm, setLoginForm] = useState({ username: "", password: "" });
   const [registerForm, setRegisterForm] = useState({ empresaName: "", adminName: "", email: "", password: "", confirm: "" });
   const [forgotEmail, setForgotEmail] = useState("");
@@ -267,7 +267,7 @@ export function AuthScreen({ config, onLogin, saveConfig }) {
               <div style={{ marginTop: 14, textAlign: "center" }}>
                 <button style={linkStyle} onClick={() => switchMode("login")}>Ya tengo cuenta — Iniciar sesión</button>
               </div>
-              <div style={noteStyle}>Tu empresa tendrá datos completamente aislados. Puedes agregar más usuarios desde el panel de administración.</div>
+              <div style={noteStyle}>Tu empresa tendrá datos completamente aislados. Puedes agregar más usuarios desde el panel de administración.<br />Al crear tu cuenta aceptas los <a href="/terminos" target="_blank" rel="noopener" style={{ color: "rgba(255,255,255,0.7)" }}>Términos de servicio</a> y la <a href="/privacidad" target="_blank" rel="noopener" style={{ color: "rgba(255,255,255,0.7)" }}>Política de privacidad</a>.</div>
             </>
           )}
 
@@ -294,6 +294,11 @@ export function AuthScreen({ config, onLogin, saveConfig }) {
               </div>
             </>
           )}
+        </div>
+        <div style={{ display: "flex", justifyContent: "center", gap: 16, flexWrap: "wrap", marginTop: 18, fontSize: 12 }}>
+          {[["/precios", "Planes y precios"], ["/terminos", "Términos"], ["/privacidad", "Privacidad"]].map(([href, txt]) => (
+            <a key={href} href={href} style={{ color: "rgba(255,255,255,0.45)", textDecoration: "none" }}>{txt}</a>
+          ))}
         </div>
       </div>
     </div>

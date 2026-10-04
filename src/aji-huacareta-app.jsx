@@ -94,6 +94,9 @@ export default function App() {
   }, []);
 
   // Suscripción (el servidor crea el periodo de prueba si no existe)
+  const recargarSuscripcion = useCallback(() => {
+    suscripcionService.getOCrearTrial().then(setSuscripcion).catch(() => {});
+  }, []);
   useEffect(() => {
     if (!user?.empresa_id || user?.role === "superadmin") return;
     suscripcionService.getOCrearTrial().then(setSuscripcion).catch(() => {});
@@ -164,7 +167,7 @@ export default function App() {
   if (!user.empresa_id) return <OnboardingIncompleteScreen onRetry={handleRetryOnboarding} onLogout={handleLogout} />;
   if (!user.activo) return <OnboardingIncompleteScreen onRetry={handleRetryOnboarding} onLogout={handleLogout} desactivado />;
   if (user.role !== "superadmin" && suscripcion && suscripcionService.estaVencida(suscripcion)) {
-    return <SuscripcionVencida suscripcion={suscripcion} whatsapp={waConfig} onLogout={handleLogout} />;
+    return <SuscripcionVencida suscripcion={suscripcion} whatsapp={waConfig} user={user} onLogout={handleLogout} onActualizado={recargarSuscripcion} />;
   }
   // Primera vez en este navegador: aún no hay caché que mostrar
   if (!estado.cargadoUnaVez) return loadingScreen;
@@ -192,10 +195,12 @@ export default function App() {
           {user.role !== "superadmin" && suscripcion && !suscripcionService.estaVencida(suscripcion) && dias <= 7 && (
             <div style={{ background: "#92400e", borderBottom: "1px solid #b45309", padding: "8px 18px", display: "flex", alignItems: "center", gap: 10, fontSize: 13, color: "#fef3c7", flexShrink: 0, flexWrap: "wrap" }}>
               <span>⚠️ {dias === 0 ? "Tu suscripción vence hoy." : `Tu suscripción vence en ${dias} día${dias !== 1 ? "s" : ""}.`} Renuévala para no perder el acceso.</span>
-              <a href={`https://wa.me/${waConfig.replace(/\D/g, "")}?text=${encodeURIComponent("Hola, quiero renovar mi suscripción de Moxi Business.")}`} target="_blank" rel="noreferrer"
-                style={{ marginLeft: "auto", background: "#15803d", color: "white", borderRadius: 6, padding: "4px 12px", fontSize: 12, fontWeight: 600, textDecoration: "none", whiteSpace: "nowrap" }}>
-                Renovar por WhatsApp
-              </a>
+              {user.role === "admin" ? (
+                <button onClick={() => setTab("usuarios")}
+                  style={{ marginLeft: "auto", background: "#15803d", color: "white", border: "none", borderRadius: 6, padding: "4px 12px", fontSize: 12, fontWeight: 600, cursor: "pointer", whiteSpace: "nowrap", fontFamily: FONT }}>
+                  Renovar ahora
+                </button>
+              ) : <span style={{ marginLeft: "auto", fontSize: 12, opacity: 0.85 }}>Avísale al administrador.</span>}
             </div>
           )}
 
@@ -217,7 +222,7 @@ export default function App() {
                 {seccion("gastos", <GastosPage {...props} />)}
                 {seccion("analisis", <Analisis {...props} />)}
                 {seccion("exportar", <Exportar {...props} />)}
-                {seccion("usuarios", <UsuariosAdmin {...props} onProfileUpdate={name => setUser(u => ({ ...u, name }))} />)}
+                {seccion("usuarios", <UsuariosAdmin {...props} suscripcion={suscripcion} onSuscripcion={recargarSuscripcion} onProfileUpdate={name => setUser(u => ({ ...u, name }))} />)}
                 {seccion("superadmin", <SuperAdminPanel {...props} />)}
               </Suspense>
             </div>

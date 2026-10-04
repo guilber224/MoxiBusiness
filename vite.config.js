@@ -40,7 +40,8 @@ export default defineConfig({
         // al instalar la app (eran ~1,2 MB extra en datos móviles); se cachean al usarlas.
         globIgnores: ['**/xlsx-*.js', '**/jspdf*.js', '**/html2canvas*.js', '**/purify*.js', '**/index.es-*.js', '**/zxing-*.js'],
         navigateFallback: 'index.html',
-        navigateFallbackDenylist: [/^\/api\//],
+        // Las páginas públicas no son la app: el service worker no debe reemplazarlas por index.html
+        navigateFallbackDenylist: [/^\/api\//, /^\/(precios|terminos|privacidad)(\.html)?\/?$/],
         runtimeCaching: [
           {
             urlPattern: ({ url }) => url.pathname.startsWith('/assets/'),
@@ -53,6 +54,8 @@ export default defineConfig({
   ],
   build: {
     rollupOptions: {
+      // App + páginas públicas (precios, términos y privacidad)
+      input: { main: 'index.html', precios: 'precios.html', terminos: 'terminos.html', privacidad: 'privacidad.html' },
       output: {
         // Librerías en archivos propios: cambian poco, así el navegador las reutiliza de caché
         // entre versiones y solo descarga de nuevo el código de la app.

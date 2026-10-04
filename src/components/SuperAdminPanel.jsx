@@ -3,6 +3,7 @@ import { Shield, RefreshCw, MessageCircle, Check, X, Edit2, Users, Trash2, Alert
 import { suscripcionService } from "../services/suscripcionService.js";
 import { FONT } from "../theme.jsx";
 import toast from "react-hot-toast";
+import { SuperAdminCobros } from "./SuperAdminCobros.jsx";
 
 const PLAN_LABELS = { trial: "Trial", activo: "Activo", anual: "Anual", enterprise: "Enterprise" };
 const PLAN_COLORS = { trial: "#f59e0b", activo: "#22c55e", anual: "#22C5FE", enterprise: "#863bff" };
@@ -19,7 +20,7 @@ function DiasChip({ sus }) {
   );
 }
 
-export function SuperAdminPanel() {
+export function SuperAdminPanel({ user }) {
   const [suscripciones, setSuscripciones] = useState([]);
   const [usuarios, setUsuarios] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -132,6 +133,9 @@ export function SuperAdminPanel() {
           Actualizar
         </button>
       </div>
+
+      <SuperAdminCobros onCambio={cargar} user={user} />
+
 
       {/* WhatsApp config */}
       <div style={card}>
