@@ -28,7 +28,7 @@ export function DashboardPremium({ D, setTab, user, refreshTrigger = 0 }) {
 
   // Inventario: mapa O(1) para búsquedas rápidas de stock
   const stockMap = useMemo(() => Object.fromEntries(inventory.map(i => [i.productId, i.stock || 0])), [inventory]);
-  const lowStock = useMemo(() => products.filter(p => p.minStock > 0 && (stockMap[p.id] || 0) <= p.minStock), [products, stockMap]);
+  const lowStock = useMemo(() => products.filter(p => !p.isGroup && p.minStock > 0 && (stockMap[p.id] || 0) <= p.minStock), [products, stockMap]);
 
   // debtClients: O(sales + customers) con Map — antes era O(customers × sales × 3)
   const debtClients = useMemo(() => {

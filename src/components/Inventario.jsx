@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { n, fDateTime } from "../utils/businessLogic.js";
 import { Bs } from "../currency.js";
 import { C } from "../theme.jsx";
@@ -12,6 +12,8 @@ import { KPI } from "./ui/KPI.jsx";
 import { Table } from "./ui/Table.jsx";
 import { Chip } from "./ui/Chip.jsx";
 import { SelectorProducto } from "./ui/SelectorProducto.jsx";
+import { diasParaVencer, estadoVencimiento, ordenarLotes } from "../utils/lotes.js";
+import { fDate } from "../utils/businessLogic.js";
 
 const SIN_CATEGORIA = { id: DEFAULT_CATEGORY_ID, name: "Sin categoría" };
 // Agotado = sin stock (siempre). Stock bajo = por debajo del mínimo configurado.
@@ -23,10 +25,15 @@ const MOV = {
   anulacion: ["↺ Anulación", C.blue, "±"], salida: ["↓ Salida", C.red, "-"], venta: ["↓ Venta", C.red, "-"],
   produccion: ["⚙ Producción", C.blue, "±"], ajuste: ["✏ Ajuste", C.blue, "="],
 };
-const FORM_VACIO = { productId: "", type: "entrada", qty: "", cost: "", notes: "" };
+const FORM_VACIO = { productId: "", type: "entrada", qty: "", cost: "", notes: "", lote: "", vence: "" };
 
 export function Inventario({ D, A }) {
-  const { products, movements } = D;
+  // Lo que tiene stock propio: productos simples y variantes (los productos con variantes solo agrupan)
+  const products = D.vendibles || D.products;
+  const { movements } = D;
+  const lotes = useMemo(() => ordenarLotes(D.lotes).map(l => ({ ...l, dias: diasParaVencer(l.expires), producto: products.find(p => p.id === l.productId) })).filter(l => l.producto), [D.lotes, products]);
+  const porVencer = lotes.filter(l => l.dias != null && l.dias <= 30);
+  const [verTodosLotes, setVerTodosLotes] = useState(false);
   const categoryOptions = [SIN_CATEGORIA, ...D.categories];
   const [modal, setModal] = useState(false); const [filter, setFilter] = useState("all"); const [q, setQ] = useState("");
   const [form, setForm] = useState(FORM_VACIO);
@@ -47,6 +54,12 @@ export function Inventario({ D, A }) {
     if (form.qty === "" || n(form.qty) < 0 || (form.type !== "ajuste" && n(form.qty) <= 0)) { setErr("Ingresa una cantidad válida"); return; }
     setErr("");
     const tipo = form.type.toUpperCase();
+    if (form.type === "entrada" && prodSel?.lotControl) {
+      if (!form.vence) { setErr("Indica la fecha de vencimiento del lote"); return; }
+      const okLote = await ejecutar(() => A.loteIngresar(form.productId, n(form.qty), form.lote, form.vence, n(form.cost) || null, form.notes), { exito: "Entrada registrada en su lote" });
+      if (okLote) { setModal(false); setForm(FORM_VACIO); }
+      return;
+    }
     const ok = await ejecutar(() => A.movimientoStock(form.productId, tipo, n(form.qty), form.type === "entrada" ? n(form.cost) : null, form.notes),
       { exito: "Movimiento registrado" });
     if (ok) { setModal(false); setForm(FORM_VACIO); }
@@ -80,7 +93,23 @@ export function Inventario({ D, A }) {
         <KPI label="Valor a costo" value={Bs(valorCosto)} Icon="💰" color={C.green} />
         <KPI label="Stock bajo" value={bajos.length} Icon="⚠️" color={C.amber} />
         <KPI label="Agotados" value={agotados.length} Icon="🚫" color={C.red} />
+        {lotes.length > 0 && <KPI label="Vencen en 30 días" value={porVencer.length} Icon="⏳" color={porVencer.length ? C.red : C.green} />}
       </div>
+
+      {lotes.length > 0 && <div style={{ ...card(), marginBottom: 14 }}>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 10, gap: 8, flexWrap: "wrap" }}>
+          <div style={{ fontWeight: 700, fontSize: 13 }}>⏳ Lotes y vencimientos</div>
+          <span style={{ fontSize: 12, color: C.textFaint }}>Las ventas descuentan primero el lote que vence antes</span>
+        </div>
+        <Table cols={[
+          { key: "producto", label: "Producto", render: (p) => p?.name },
+          { key: "code", label: "Lote", render: v => <span style={{ whiteSpace: "nowrap", fontWeight: 600 }}>{v}</span> },
+          { key: "qty", label: "Cantidad", render: (v, l) => `${v} ${l.producto?.unit || ""}` },
+          { key: "expires", label: "Vence", render: v => (v ? fDate(v) : "—") },
+          { key: "dias", label: "Estado", render: d => { const e = estadoVencimiento(d); return <span style={mkBadge(e.badge)}>{e.texto}</span>; } },
+        ]} rows={verTodosLotes ? lotes : lotes.slice(0, 8)} />
+        {lotes.length > 8 && <button onClick={() => setVerTodosLotes(v => !v)} style={{ ...mkBtn("ghost"), marginTop: 8, fontSize: 12 }}>{verTodosLotes ? "Ver menos" : `Ver los ${lotes.length} lotes`}</button>}
+      </div>}
       <div style={{ display: "flex", gap: 8, marginBottom: 12, flexWrap: "wrap" }}>
         <SearchInput value={q} onChange={setQ} placeholder="Buscar producto..." />
         <Chip value={filter} onChange={setFilter} options={[["all", "Todos"], ["ok", "Disponible"], ["low", "Stock bajo"], ["empty", "Agotados"]]} />
@@ -140,6 +169,11 @@ export function Inventario({ D, A }) {
             <div style={{ flex: 1 }}><label style={lbl}>{form.type === "ajuste" ? "Stock contado *" : "Cantidad *"}</label><input type="number" min="0" step="any" inputMode="decimal" style={inp} value={form.qty} onChange={e => setForm({ ...form, qty: e.target.value })} placeholder="0" autoFocus={!!form.productId} /></div>
             {form.type === "entrada" && <div style={{ flex: 1 }}><label style={lbl}>Costo unitario</label><input type="number" min="0" step="0.01" inputMode="decimal" style={inp} value={form.cost} onChange={e => setForm({ ...form, cost: e.target.value })} placeholder="Opcional" /></div>}
           </div>
+          {prodSel?.lotControl && form.type === "entrada" && <div style={row()}>
+            <div style={{ flex: 1 }}><label style={lbl}>N° de lote</label><input style={inp} value={form.lote} onChange={e => setForm({ ...form, lote: e.target.value })} placeholder="Ej: L2405A" /></div>
+            <div style={{ flex: 1 }}><label style={lbl}>Vencimiento *</label><input type="date" style={inp} value={form.vence} onChange={e => setForm({ ...form, vence: e.target.value })} /></div>
+          </div>}
+          {prodSel?.lotControl && form.type !== "entrada" && <div style={{ fontSize: 12, color: C.textMid, marginBottom: 10 }}>Se descontará primero del lote que vence antes.</div>}
           <div style={{ marginBottom: 10 }}><label style={lbl}>Notas</label><input style={inp} value={form.notes} onChange={e => setForm({ ...form, notes: e.target.value })} placeholder="Motivo del movimiento" /></div>
           {nuevoStock !== null && <div style={{ fontSize: 12, color: nuevoStock < 0 ? C.red : C.textMid, marginBottom: 10 }}>Stock: {prodSel.stock} → <strong>{nuevoStock}</strong> {prodSel.unit}{nuevoStock < 0 && " (quedará negativo)"}</div>}
           {err && <div style={{ color: C.red, fontSize: 13, marginBottom: 10 }}>{err}</div>}

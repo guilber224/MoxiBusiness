@@ -17,7 +17,7 @@ const CACHE_VERSION = "v2";
 const cacheKey = eid => `moxi_${CACHE_VERSION}_${eid}`;
 export const VACIO = {
   config: { businessName: "", currency: "BOB", logo_url: null, qr_url: null }, products: [], categories: [], customers: [], sales: [], expenses: [], movements: [],
-  pedidos: [], suppliers: [], purchases: [], formulas: [], orders: [], users: [], activityLogs: [], caja: null,
+  pedidos: [], suppliers: [], purchases: [], formulas: [], orders: [], users: [], activityLogs: [], caja: null, lotes: [],
 };
 const leerCache = eid => { try { const v = JSON.parse(localStorage.getItem(cacheKey(eid))); return v && typeof v === "object" ? { ...VACIO, ...v } : null; } catch { return null; } };
 const escribirCache = (eid, data) => { try { localStorage.setItem(cacheKey(eid), JSON.stringify(data)); } catch { /* cuota llena: la app sigue funcionando sin caché */ } };
@@ -95,11 +95,17 @@ export function useMoxiData(user) {
   const refrescarProductos = useCallback(async ids => {
     const unicos = [...new Set((ids || []).filter(Boolean))];
     if (!unicos.length) return;
-    const { data: rows } = await supabase.from("productos").select(PRODUCTO_COLS).in("id", unicos);
+    let { data: rows } = await supabase.from("productos").select(PRODUCTO_COLS).in("id", unicos);
+    // Si cambió una variante, también cambió el stock total de su producto padre
+    const padres = [...new Set((rows || []).map(r => r.padre_id).filter(id => id && !unicos.includes(id)))];
+    if (rows && padres.length) { const { data: ps } = await supabase.from("productos").select(PRODUCTO_COLS).in("id", padres); rows = [...rows, ...(ps || [])]; }
     if (rows) mutar("products", ps => rows.reduce((acc, r) => (r.activo === false ? sinId(acc, r.id) : porId(acc, toProduct(r))), ps));
   }, [mutar]);
   const refrescarCaja = useCallback(async () => {
     try { const c = await api.caja.resumen(); setData(d => ({ ...d, caja: c })); } catch { /* se reintenta en la próxima carga */ }
+  }, []);
+  const refrescarLotes = useCallback(async () => {
+    try { const l = await api.lotes.listar(); setData(d => ({ ...d, lotes: l })); } catch { /* se reintenta en la próxima carga */ }
   }, []);
   const refrescarKardex = useCallback(async () => {
     try { const m = await api.inventario.kardex(); setData(d => ({ ...d, movements: m })); } catch { /* idem */ }
@@ -141,9 +147,10 @@ export function useMoxiData(user) {
         else if (p.new?.id) mutar("pedidos", ps => porId(ps, p.new));
       })
       .on("postgres_changes", { event: "*", schema: "public", table: "caja_turnos", filter: f }, () => refrescarCaja())
+      .on("postgres_changes", { event: "*", schema: "public", table: "lotes", filter: f }, () => { clearTimeout(pendientes.get("lotes")); pendientes.set("lotes", setTimeout(refrescarLotes, 600)); })
       .subscribe();
     return () => { pendientes.forEach(clearTimeout); supabase.removeChannel(ch); };
-  }, [eid, mutar, refrescarCaja]);
+  }, [eid, mutar, refrescarCaja, refrescarLotes]);
 
   // ── Acciones ───────────────────────────────────────────────────────────────
   const acciones = useMemo(() => {
@@ -245,6 +252,13 @@ export function useMoxiData(user) {
       actualizarConfig: async cambios => { const r = await api.empresa.actualizar(E(), cambios); setData(d => ({ ...d, config: r })); return r; },
       subirArchivoEmpresa: (file, nombre) => api.empresa.subirArchivo(file, E(), nombre),
       // Importar productos o clientes desde Excel; luego se recarga todo para traer categorías y kardex
+      // Variantes y lotes
+      guardarVariantes: async (padreId, atributos, variantes) => { const r = await api.productos.guardarVariantes(padreId, atributos, variantes); await cargar(); return r; },
+      loteIngresar: async (productoId, cantidad, lote, vencimiento, costo, notas) => {
+        const r = await api.lotes.ingresar(productoId, cantidad, lote, vencimiento, costo, notas);
+        mutar("products", ps => porId(ps, r)); refrescarKardex(); refrescarLotes();
+        return r;
+      },
       importarProductos: async (filas, actualizar) => { const r = await api.importar.productos(filas, actualizar); await cargar(); return r; },
       importarClientes: async (filas, actualizar) => { const r = await api.importar.clientes(filas, actualizar); await cargar(); return r; },
       completarOnboarding: async (completado = true) => { await api.empresa.onboarding(completado); setData(d => ({ ...d, config: { ...d.config, onboardingCompletado: completado } })); },
@@ -255,6 +269,19 @@ export function useMoxiData(user) {
   // Vista derivada para pantallas que esperan "inventory" separado
   const inventory = useMemo(() => data.products.map(p => ({ productId: p.id, stock: p.stock })), [data.products]);
 
-  const D = useMemo(() => ({ ...data, config: data.config || VACIO.config, inventory }), [data, inventory]);
+  // Variantes: la foto del producto padre sirve para sus variantes; catálogo = lo que se muestra (sin variantes sueltas);
+  // vendibles = lo que tiene stock propio (sin los grupos)
+  const productos = useMemo(() => {
+    const porIdP = new Map(data.products.map(p => [p.id, p]));
+    return data.products.map(p => (p.parentId && !p.img && porIdP.get(p.parentId)?.img ? { ...p, img: porIdP.get(p.parentId).img } : p));
+  }, [data.products]);
+  const catalogo = useMemo(() => productos.filter(p => !p.parentId), [productos]);
+  const vendibles = useMemo(() => productos.filter(p => !p.isGroup), [productos]);
+  const variantesDe = useMemo(() => {
+    const m = new Map();
+    productos.forEach(p => { if (p.parentId) m.set(p.parentId, [...(m.get(p.parentId) || []), p]); });
+    return m;
+  }, [productos]);
+  const D = useMemo(() => ({ ...data, products: productos, catalogo, vendibles, variantesDe, config: data.config || VACIO.config, inventory }), [data, productos, catalogo, vendibles, variantesDe, inventory]);
   return { data: D, estado, acciones };
 }

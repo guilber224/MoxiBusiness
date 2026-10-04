@@ -14,6 +14,7 @@ import { Modal } from "./ui/Modal.jsx";
 import { Empty } from "./ui/Empty.jsx";
 import { Header } from "./ui/Header.jsx";
 import { SearchInput } from "./ui/SearchInput.jsx";
+import { SelectorVariante } from "./ui/SelectorVariante.jsx";
 
 const ESTADOS_COTIZACION = [
   { id: "borrador",  label: "Borrador",  badge: "gray"  },
@@ -201,7 +202,10 @@ export function Pedidos({ D, A, user }) {
     return { ...f, items: [...f.items, { id: uid(), productId, qty: 1, unitPrice: product.price }] };
   });
   const posCategories = [["all", "Todos"], ...categoryOptions.map(c => [c.id, c.name])];
-  const posProducts = products.filter(p => (posCategory === "all" || p.cat === posCategory) && `${p.name} ${getCategoryName(categoryOptions, p.cat)}`.toLowerCase().includes(posSearch.toLowerCase()));
+  // Productos con variantes: se elige talla/color antes de agregar
+  const [eligiendoVariante, setEligiendoVariante] = useState(null);
+  const agregarAlCarrito = id => { const p = products.find(x => x.id === id); if (p?.isGroup) setEligiendoVariante(p); else addProductToCart(id); };
+  const posProducts = (D.catalogo || products).filter(p => (posCategory === "all" || p.cat === posCategory) && `${p.name} ${getCategoryName(categoryOptions, p.cat)}`.toLowerCase().includes(posSearch.toLowerCase()));
 
   const subtotal = form.items.reduce((a, i) => a + n(i.qty) * n(i.unitPrice), 0);
   const discountAmt = form.discountType === "pct" ? subtotal * Math.min(n(form.discount), 100) / 100 : Math.min(n(form.discount), subtotal);
@@ -461,7 +465,7 @@ export function Pedidos({ D, A, user }) {
               ) : posProducts.map(product => {
                 const inCart = form.items.find(i => i.productId === product.id);
                 return (
-                  <button key={product.id} type="button" onClick={() => addProductToCart(product.id)}
+                  <button key={product.id} type="button" onClick={() => agregarAlCarrito(product.id)}
                     style={{ ...card({ padding: 0, overflow: "hidden", cursor: "pointer" }), border: `1.5px solid ${inCart ? C.brand : C.border}`, textAlign: "left", outline: "none", transition: "border-color 0.12s" }}
                     onMouseEnter={e => e.currentTarget.style.borderColor = C.brand}
                     onMouseLeave={e => e.currentTarget.style.borderColor = inCart ? C.brand : C.border}>
@@ -550,6 +554,7 @@ export function Pedidos({ D, A, user }) {
       </Modal>}
 
       {printDoc && <DocumentoModal doc={printDoc} config={config} onClose={() => setPrintDoc(null)} />}
+      {eligiendoVariante && <SelectorVariante grupo={eligiendoVariante} variantes={D.variantesDe?.get(eligiendoVariante.id) || []} onClose={() => setEligiendoVariante(null)} onElegir={v => { addProductToCart(v.id); setEligiendoVariante(null); }} />}
     </div>
   );
 }

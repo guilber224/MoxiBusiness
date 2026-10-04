@@ -8,7 +8,7 @@ const METODO_A_APP = { EFECTIVO: "efectivo", QR: "qr", TRANSFERENCIA: "banco", T
 export const metodoApp = m => METODO_A_APP[m] || "efectivo";
 
 // ── Productos ──────────────────────────────────────────────────────────────
-export const PRODUCTO_COLS = "id,nombre,precio_venta,precio_costo,stock,stock_minimo,unidad,descripcion,imagen_url,categoria_id,codigo,activo,created_at";
+export const PRODUCTO_COLS = "id,nombre,precio_venta,precio_costo,stock,stock_minimo,unidad,descripcion,imagen_url,categoria_id,codigo,activo,created_at,padre_id,es_grupo,variante_nombre,atributos,controla_lotes";
 export const toProduct = r => ({
   id: r.id,
   name: r.nombre || "",
@@ -22,6 +22,12 @@ export const toProduct = r => ({
   cat: r.categoria_id || DEFAULT_CATEGORY_ID,
   barcode: r.codigo || "",
   createdAt: r.created_at,
+  // Variantes: el grupo agrupa (no se vende); cada variante es un producto con parentId
+  parentId: r.padre_id || null,
+  isGroup: !!r.es_grupo,
+  variantName: r.variante_nombre || "",
+  attrs: r.atributos || null,
+  lotControl: !!r.controla_lotes,
 });
 export const fromProduct = p => ({
   nombre: (p.name || "").trim(),
@@ -33,7 +39,12 @@ export const fromProduct = p => ({
   imagen_url: p.img && !String(p.img).startsWith("data:") ? p.img : null,
   categoria_id: p.cat && p.cat !== DEFAULT_CATEGORY_ID ? p.cat : null,
   codigo: (p.barcode || "").trim() || null,
+  ...(typeof p.lotControl === "boolean" ? { controla_lotes: p.lotControl } : {}),
 });
+
+// ── Lotes y vencimientos ───────────────────────────────────────────────────
+export const LOTE_COLS = "id,producto_id,codigo,vencimiento,cantidad,cantidad_inicial,costo_unitario,created_at";
+export const toLote = r => ({ id: r.id, productId: r.producto_id, code: r.codigo, expires: r.vencimiento || null, qty: num(r.cantidad), initialQty: num(r.cantidad_inicial), cost: num(r.costo_unitario), createdAt: r.created_at });
 
 // ── Categorías ─────────────────────────────────────────────────────────────
 export const toCategory = r => ({ id: r.id, name: r.nombre, locked: false });

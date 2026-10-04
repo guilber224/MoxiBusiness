@@ -13,7 +13,8 @@ import { Table } from "./ui/Table.jsx";
 const FORMULA_VACIA = { name: "", inputId: "", inputQty: "", inputUnit: "", outputId: "", outputQty: "", outputUnit: "", laborCost: 0, energyCost: 0, desc: "" };
 
 export function Produccion({ D, A, user }) {
-  const { products, formulas, orders } = D;
+  const { formulas, orders } = D;
+  const products = D.vendibles || D.products; // insumos y productos con stock propio (no los grupos de variantes)
   const [ejecutar, guardando] = useAccion();
   const [err, setErr] = useState("");
   const admin = isAdmin(user) || user?.role === "superadmin";

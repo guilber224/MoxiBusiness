@@ -12,12 +12,16 @@ import { Empty } from "./ui/Empty.jsx";
 import { Modal } from "./ui/Modal.jsx";
 import { SearchInput } from "./ui/SearchInput.jsx";
 import { ImportarExcel } from "./ImportarExcel.jsx";
+import { VariantesEditor } from "./VariantesEditor.jsx";
 
 const SIN_CATEGORIA = { id: DEFAULT_CATEGORY_ID, name: "Sin categoría", locked: true };
-const FORM_VACIO = { name: "", cat: DEFAULT_CATEGORY_ID, unit: "", price: "", cost: "", minStock: "", desc: "", img: null, barcode: "" };
+const FORM_VACIO = { name: "", cat: DEFAULT_CATEGORY_ID, unit: "", price: "", cost: "", minStock: "", desc: "", img: null, barcode: "", lotControl: false, conVariantes: false };
 
 export function Productos({ D, A, user }) {
-  const { products } = D;
+  // Catálogo: productos simples y productos con variantes (las variantes se gestionan dentro de su producto)
+  const products = D.catalogo || D.products;
+  const variantesDe = D.variantesDe || new Map();
+  const [editVariantes, setEditVariantes] = useState(null);
   const categoryOptions = [SIN_CATEGORIA, ...D.categories];
   const [q, setQ] = useState("");
   const [cat, setCat] = useState("all");
@@ -32,7 +36,7 @@ export function Productos({ D, A, user }) {
   const imgRef = useRef();
 
   const filtered = products.filter(p => (cat === "all" || p.cat === cat)
-    && `${p.name} ${p.barcode}`.toLowerCase().includes(q.toLowerCase()));
+    && `${p.name} ${p.barcode} ${(variantesDe.get(p.id) || []).map(v => v.barcode).join(" ")}`.toLowerCase().includes(q.toLowerCase()));
 
   const openForm = (product = null) => {
     setErr(""); setArchivo(null);
@@ -47,11 +51,12 @@ export function Productos({ D, A, user }) {
     const ok = await ejecutar(async () => {
       const datos = { ...form, price: n(form.price), cost: n(form.cost), minStock: n(form.minStock) };
       if (modal === "new") {
-        const creado = await A.crearProducto({ ...datos, img: null });
+        let creado = await A.crearProducto({ ...datos, img: null });
         if (archivo) {
           const url = await A.subirImagenProducto(archivo, creado.id);
-          await A.actualizarProducto(creado.id, { ...datos, img: url });
+          creado = await A.actualizarProducto(creado.id, { ...datos, img: url });
         }
+        if (form.conVariantes) setTimeout(() => setEditVariantes(creado), 0);
       } else {
         const img = archivo ? await A.subirImagenProducto(archivo, modal.id) : datos.img;
         await A.actualizarProducto(modal.id, { ...datos, img });
@@ -145,11 +150,14 @@ export function Productos({ D, A, user }) {
                   <div style={{ fontWeight: 700, fontSize: 13, marginBottom: 6, lineHeight: 1.3 }}>{p.name}</div>
                   <div style={{ fontSize: 16, fontWeight: 800, color: C.red, letterSpacing: "-0.03em" }}>{Bs(p.price)}<span style={{ fontSize: 10, fontWeight: 400, color: C.textFaint }}>/{p.unit || "u"}</span></div>
                   {p.cost > 0 && p.price > 0 && <div style={{ fontSize: 11, color: C.green, marginTop: 1, fontWeight: 600 }}>Margen: {Math.round((p.price - p.cost) / p.price * 100)}%</div>}
-                  <div style={{ marginTop: 6 }}>
+                  <div style={{ marginTop: 6, display: "flex", gap: 4, flexWrap: "wrap" }}>
                     <span style={mkBadge(agotado ? "red" : bajo ? "amber" : "green")}>{agotado ? "Agotado" : `Stock: ${p.stock} ${p.unit || ""}`}</span>
+                    {p.isGroup && <span style={mkBadge("blue")}>{(variantesDe.get(p.id) || []).length} variantes</span>}
+                    {p.lotControl && <span style={mkBadge("gray")}>Lotes</span>}
                   </div>
                   <div style={{ display: "flex", gap: 4, marginTop: 8 }}>
                     <button onClick={() => openForm(p)} aria-label={`Editar ${p.name}`} style={{ ...mkBtn("ghost"), padding: "4px 8px", flex: 1, justifyContent: "center", fontSize: 11 }}>✏️ Editar</button>
+                    {p.isGroup && <button onClick={() => setEditVariantes(p)} aria-label={`Variantes de ${p.name}`} title="Tallas, colores…" style={{ ...mkBtn("ghost"), padding: "4px 8px", fontSize: 11 }}>🎨</button>}
                     {admin && <button onClick={() => setDeleteTarget(p)} aria-label={`Eliminar ${p.name}`} style={{ ...mkBtn("danger"), padding: "4px 8px", justifyContent: "center", fontSize: 11 }}>🗑️</button>}
                   </div>
                 </div>
@@ -180,7 +188,24 @@ export function Productos({ D, A, user }) {
             <div style={{ flex: 1 }}><label style={lbl}>Código de barras</label><input style={inp} value={form.barcode} onChange={e => setForm({ ...form, barcode: e.target.value })} placeholder="Opcional" /></div>
             <div style={{ flex: 2 }}><label style={lbl}>Descripción</label><input style={inp} value={form.desc} onChange={e => setForm({ ...form, desc: e.target.value })} placeholder="Opcional" /></div>
           </div>
-          {modal === "new" && <div style={{ fontSize: 12, color: C.textFaint, marginBottom: 10 }}>El stock inicial se carga desde <strong>Inventario → Registrar movimiento</strong>, para que quede en el kardex.</div>}
+          <div style={{ display: "grid", gap: 6, marginBottom: 12, padding: 10, background: "var(--color-bg-primary)", borderRadius: 10 }}>
+            {modal === "new" ? (
+              <label style={{ display: "flex", gap: 8, alignItems: "center", fontSize: 13, cursor: "pointer" }}>
+                <input type="checkbox" checked={!!form.conVariantes} onChange={e => setForm({ ...form, conVariantes: e.target.checked })} />
+                <span><strong>Tiene variantes</strong> (tallas, colores, sabores…): las defines al guardar</span>
+              </label>
+            ) : (
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8, fontSize: 13, flexWrap: "wrap" }}>
+                <span>{modal.isGroup ? <><strong>{(variantesDe.get(modal.id) || []).length} variantes</strong> · el precio y el código de cada una se editan en Variantes</> : "¿Este producto tiene tallas, colores o sabores?"}</span>
+                <button onClick={() => { setModal(null); setEditVariantes(modal); }} style={{ ...mkBtn("ghost"), fontSize: 12 }}>🎨 {modal.isGroup ? "Editar variantes" : "Crear variantes"}</button>
+              </div>
+            )}
+            <label style={{ display: "flex", gap: 8, alignItems: "center", fontSize: 13, cursor: "pointer" }}>
+              <input type="checkbox" checked={!!form.lotControl} onChange={e => setForm({ ...form, lotControl: e.target.checked })} />
+              <span><strong>Controlar lotes y vencimientos</strong> (farmacia, alimentos): las ventas descuentan primero lo que vence antes</span>
+            </label>
+          </div>
+          {modal === "new" && !form.conVariantes && <div style={{ fontSize: 12, color: C.textFaint, marginBottom: 10 }}>El stock inicial se carga desde <strong>Inventario → Registrar movimiento</strong>, para que quede en el kardex.</div>}
           <div style={{ marginBottom: 18 }}>
             <label style={lbl}>Foto</label>
             <div style={{ display: "flex", gap: 10, alignItems: "center" }}>
@@ -197,6 +222,8 @@ export function Productos({ D, A, user }) {
           </div>
         </Modal>
       )}
+
+      {editVariantes && <VariantesEditor producto={products.find(x => x.id === editVariantes.id) || editVariantes} variantes={variantesDe.get(editVariantes.id) || []} A={A} onClose={() => setEditVariantes(null)} />}
 
       {deleteTarget && (
         <Modal title="Eliminar producto" onClose={() => setDeleteTarget(null)} width={420}>

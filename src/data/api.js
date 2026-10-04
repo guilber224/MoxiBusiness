@@ -3,7 +3,7 @@
 // mensaje en español listo para mostrar al usuario.
 import { supabase } from "../lib/supabaseClient";
 import {
-  PRODUCTO_COLS, CLIENTE_COLS, VENTA_SELECT, GASTO_COLS, MOV_COLS, COMPRA_SELECT, EMPRESA_COLS,
+  PRODUCTO_COLS, LOTE_COLS, toLote, CLIENTE_COLS, VENTA_SELECT, GASTO_COLS, MOV_COLS, COMPRA_SELECT, EMPRESA_COLS,
   toProduct, toCategory, toCustomer, toSale, toExpense, toMovement, toSupplier, toPurchase,
   toFormula, toOrder, toConfig, toUser, toActivity,
   fromProduct, fromCustomer, fromExpense, fromSupplier, fromFormula, fromConfig,
@@ -46,13 +46,14 @@ export async function cargarTodo(empresaId) {
     users:      supabase.from("usuarios").select("id,nombre,email,role,activo,created_at").order("nombre"),
     activityLogs: supabase.from("activity_logs").select("id,usuario_id,usuario_nombre,accion,detalle,created_at").order("created_at", { ascending: false }).limit(200),
     caja:       supabase.rpc("caja_resumen"),
+    lotes:      supabase.from("lotes").select(LOTE_COLS).gt("cantidad", 0).order("vencimiento", { ascending: true, nullsFirst: false }).limit(5000),
   };
   const mapeo = {
     config: r => (r ? toConfig(r) : null), products: rs => rs.map(toProduct), categories: rs => rs.map(toCategory),
     customers: rs => rs.map(toCustomer), sales: rs => rs.map(toSale), expenses: rs => rs.map(toExpense),
     movements: rs => rs.map(toMovement), pedidos: rs => rs, suppliers: rs => rs.map(toSupplier),
     purchases: rs => rs.map(toPurchase), formulas: rs => rs.map(toFormula), orders: rs => rs.map(toOrder),
-    users: rs => rs.map(toUser), activityLogs: rs => rs.map(toActivity), caja: r => r || null,
+    users: rs => rs.map(toUser), activityLogs: rs => rs.map(toActivity), caja: r => r || null, lotes: rs => rs.map(toLote),
   };
   const keys = Object.keys(q);
   const results = await Promise.allSettled(keys.map(k => q[k]));
@@ -70,6 +71,10 @@ export async function cargarTodo(empresaId) {
 
 // ── Productos y categorías ─────────────────────────────────────────────────
 export const productos = {
+  // Variantes (talla, color…): atributos = [{ nombre, valores: [] }], variantes = [{ id?, atributos: {}, precio, costo, codigo, stock }]
+  async guardarVariantes(padreId, atributos, variantes) {
+    return rpc("producto_variantes_guardar", { p_padre: padreId, p_atributos: atributos, p_variantes: variantes });
+  },
   async crear(p, empresaId) {
     return toProduct(ok(await supabase.from("productos").insert({ ...fromProduct(p), empresa_id: empresaId }).select(PRODUCTO_COLS).single()));
   },
@@ -130,6 +135,14 @@ export const ventas = {
 };
 
 // ── Inventario ─────────────────────────────────────────────────────────────
+export const lotes = {
+  async listar() { return ok(await supabase.from("lotes").select(LOTE_COLS).gt("cantidad", 0).order("vencimiento", { ascending: true, nullsFirst: false }).limit(5000)).map(toLote); },
+  // Entrada con número de lote y vencimiento (usa el mismo stock_movimiento del servidor)
+  async ingresar(productoId, cantidad, lote, vencimiento, costo, notas) {
+    return toProduct(await rpc("lote_ingresar", { p_producto: productoId, p_cantidad: Number(cantidad), p_lote: lote || null, p_vencimiento: vencimiento || null, p_costo: costo ? Number(costo) : null, p_notas: notas || null }));
+  },
+};
+
 export const inventario = {
   async movimiento(productoId, tipo, cantidad, costo, notas) {
     return toProduct(await rpc("stock_movimiento", { p_producto_id: productoId, p_tipo: tipo, p_cantidad: Number(cantidad), p_costo: costo ? Number(costo) : null, p_notas: notas || null }));
@@ -169,6 +182,8 @@ export const compras = {
       items: (c.items || [{ productId: c.productId, name: c.product, qty: c.qty, price: c.price }])
         .map(i => ({ producto_id: i.productId || null, nombre: i.name, cantidad: Number(i.qty), precio_unitario: Number(i.price) })),
     };
+    // Con lote: misma compra, pero la entrada de stock va al lote indicado
+    if (c.lote || c.expires) return toPurchase(await rpc("compra_registrar_lote", { p, p_lote: c.lote || null, p_vencimiento: c.expires || null }));
     return toPurchase(await rpc("compra_registrar", { p }));
   },
   async pagar(id, montoPagado) {

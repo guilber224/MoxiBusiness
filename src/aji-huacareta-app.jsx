@@ -17,6 +17,8 @@ import { suscripcionService } from "./services/suscripcionService.js";
 import { cobrosService, planIncluye } from "./services/cobrosService.js";
 import { PlanBloqueado } from "./components/PlanBloqueado.jsx";
 import { useAvisosCuenta } from "./hooks/useAvisosCuenta.js";
+import { diasParaVencer } from "./utils/lotes.js";
+import { today } from "./utils/businessLogic.js";
 import { useMoxiData } from "./data/useMoxiData.js";
 import { EstadoDatos } from "./components/ui/EstadoDatos.jsx";
 
@@ -160,7 +162,16 @@ export default function App() {
     data.sales.forEach(s => { if (s.debt > 0) deuda.set(s.customerId, (deuda.get(s.customerId) || 0) + s.debt); });
     return data.customers.filter(c => (deuda.get(c.id) || 0) > 0);
   }, [data.customers, data.sales]);
-  const appLowStock = useMemo(() => data.products.filter(p => p.minStock > 0 && p.stock <= p.minStock), [data.products]);
+  // Lotes vencidos o por vencer (30 días) para la campanita
+  const avisosLotes = useMemo(() => {
+    const conFecha = (data.lotes || []).filter(l => l.qty > 0 && l.expires).map(l => diasParaVencer(l.expires));
+    const vencidos = conFecha.filter(d => d < 0).length, pronto = conFecha.filter(d => d >= 0 && d <= 30).length;
+    const lista = [];
+    if (vencidos) lista.push({ id: `lotes-vencidos-${today()}-${vencidos}`, tipo: "error", titulo: `${vencidos} lote${vencidos === 1 ? "" : "s"} vencido${vencidos === 1 ? "" : "s"} con stock`, texto: "Retíralos de la venta", tab: "inventario" });
+    if (pronto) lista.push({ id: `lotes-pronto-${today()}-${pronto}`, tipo: "warn", titulo: `${pronto} lote${pronto === 1 ? "" : "s"} vence${pronto === 1 ? "" : "n"} en 30 días`, texto: "Revisa Inventario → Lotes y vencimientos", tab: "inventario" });
+    return lista;
+  }, [data.lotes]);
+  const appLowStock = useMemo(() => data.products.filter(p => !p.isGroup && p.minStock > 0 && p.stock <= p.minStock), [data.products]);
 
   const loadingScreen = (
     <div style={{ display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", minHeight: "100vh", fontFamily: FONT, background: "radial-gradient(circle at 30% 20%, rgba(34,197,254,0.10), transparent 50%), #0D1117", gap: 18 }}>
@@ -204,7 +215,7 @@ export default function App() {
           />
         )}
         <div style={{ display: "flex", flexDirection: "column", flex: 1, minWidth: 0, overflow: "hidden" }}>
-          <Topbar isMobile={isMobile} sidebarOpen={sidebarOpen} setSidebarOpen={setSidebarOpen} sidebarCollapsed={sidebarCollapsed} setSidebarCollapsed={setSidebarCollapsed} setTab={setTab} user={user} data={data} appDebtClients={appDebtClients} appLowStock={appLowStock} avisos={avisosCuenta} onDescartarAviso={descartarAviso} />
+          <Topbar isMobile={isMobile} sidebarOpen={sidebarOpen} setSidebarOpen={setSidebarOpen} sidebarCollapsed={sidebarCollapsed} setSidebarCollapsed={setSidebarCollapsed} setTab={setTab} user={user} data={data} appDebtClients={appDebtClients} appLowStock={appLowStock} avisos={[...avisosCuenta, ...avisosLotes]} onDescartarAviso={descartarAviso} />
 
           {user.role !== "superadmin" && suscripcion && !suscripcionService.estaVencida(suscripcion) && dias <= 7 && (
             <div style={{ background: "#92400e", borderBottom: "1px solid #b45309", padding: "8px 18px", display: "flex", alignItems: "center", gap: 10, fontSize: 13, color: "#fef3c7", flexShrink: 0, flexWrap: "wrap" }}>

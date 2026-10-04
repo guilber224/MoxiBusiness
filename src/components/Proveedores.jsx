@@ -12,13 +12,14 @@ import { Modal } from "./ui/Modal.jsx";
 import { Table } from "./ui/Table.jsx";
 
 export function Proveedores({ D, A, user }) {
-  const { suppliers, purchases, products } = D;
+  const { suppliers, purchases } = D;
+  const products = D.vendibles || D.products; // las compras entran a productos simples o a variantes
   const [ejecutar, guardando] = useAccion();
   const [err, setErr] = useState("");
   const admin = isAdmin(user) || user?.role === "superadmin";
   const [q, setQ] = useState(""); const [modal, setModal] = useState(null);
   const [form, setForm] = useState({ name: "", phone: "", address: "", product: "", notes: "" });
-  const PFORM_VACIO = () => ({ supplierId: "", productId: "", product: "", qty: "", price: "", paid: "", date: today(), notes: "", addStock: true });
+  const PFORM_VACIO = () => ({ supplierId: "", productId: "", product: "", qty: "", price: "", paid: "", date: today(), notes: "", addStock: true, lote: "", vence: "" });
   const [pForm, setPForm] = useState(PFORM_VACIO());
 
   const saveSupplier = async () => {
@@ -35,9 +36,12 @@ export function Proveedores({ D, A, user }) {
     const nombre = pForm.productId ? products.find(p => p.id === pForm.productId)?.name : pForm.product.trim();
     if (!nombre) { setErr("Elige un producto del catálogo o escribe qué compraste"); return; }
     if (n(pForm.qty) <= 0) { setErr("La cantidad debe ser mayor a 0"); return; }
+    const conLote = pForm.addStock && products.find(p => p.id === pForm.productId)?.lotControl;
+    if (conLote && !pForm.vence) { setErr("Indica la fecha de vencimiento del lote"); return; }
     setErr("");
     const ok = await ejecutar(() => A.registrarCompra({
       supplierId: pForm.supplierId || null, date: pForm.date, notes: pForm.notes, paid: n(pForm.paid), addStock: pForm.addStock,
+      ...(conLote ? { lote: pForm.lote, expires: pForm.vence } : {}),
       items: [{ productId: pForm.productId || null, name: nombre, qty: n(pForm.qty), price: n(pForm.price) }],
     }), { exito: pForm.productId && pForm.addStock ? "Compra registrada y stock actualizado" : "Compra registrada" });
     if (ok) { setModal(null); setPForm(PFORM_VACIO()); }
@@ -146,6 +150,10 @@ export function Proveedores({ D, A, user }) {
         </div>
         <div style={{ padding: "10px 12px", background: C.bg, borderRadius: R.md, marginBottom: 10, fontSize: 13 }}>Total: <strong style={{ color: C.red }}>{Bs(n(pForm.qty) * n(pForm.price))}</strong> · Deuda: <strong style={{ color: C.amber }}>{Bs(Math.max(0, n(pForm.qty) * n(pForm.price) - n(pForm.paid)))}</strong></div>
         <div style={{ marginBottom: 10 }}><label style={lbl}>Notas</label><input style={inp} value={pForm.notes} onChange={e => setPForm({ ...pForm, notes: e.target.value })} /></div>
+        {pForm.productId && pForm.addStock && products.find(p => p.id === pForm.productId)?.lotControl && <div style={row()}>
+          <div style={{ flex: 1 }}><label style={lbl}>N° de lote</label><input style={inp} value={pForm.lote} onChange={e => setPForm({ ...pForm, lote: e.target.value })} placeholder="Ej: L2405A" /></div>
+          <div style={{ flex: 1 }}><label style={lbl}>Vencimiento *</label><input type="date" style={inp} value={pForm.vence} onChange={e => setPForm({ ...pForm, vence: e.target.value })} /></div>
+        </div>}
         {pForm.productId && <label style={{ display: "flex", gap: 8, alignItems: "center", fontSize: 13, marginBottom: 14, cursor: "pointer" }}>
           <input type="checkbox" checked={pForm.addStock} onChange={e => setPForm({ ...pForm, addStock: e.target.checked })} />
           Sumar al stock y actualizar el costo promedio del producto

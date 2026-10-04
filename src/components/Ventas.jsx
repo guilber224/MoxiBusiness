@@ -16,6 +16,7 @@ import { Empty } from "./ui/Empty.jsx";
 import { Header } from "./ui/Header.jsx";
 import { Table } from "./ui/Table.jsx";
 import { SearchInput } from "./ui/SearchInput.jsx";
+import { SelectorVariante } from "./ui/SelectorVariante.jsx";
 import { imprimirTicket, leerAnchoTicket, guardarAnchoTicket, leerAutoTicket, guardarAutoTicket } from "../utils/ticketTermico.js";
 import { Chip } from "./ui/Chip.jsx";
 
@@ -481,6 +482,14 @@ export function Ventas({ D, A, user, estado }) {
     const sub = n(product.price);
     return { ...f, items: [...f.items, { id: uid(), productId, qty: 1, unitPrice: sub, original_price: sub, sub, subtotal: sub }] };
   });
+  // Producto con variantes: primero se elige la talla/color
+  const [eligiendoVariante, setEligiendoVariante] = useState(null);
+  const agregarAlCarrito = productId => {
+    const p = products.find(x => x.id === productId);
+    if (p?.isGroup) { setEligiendoVariante(p); return; }
+    addProductToCart(productId);
+  };
+  const enCarrito = p => form.items.filter(i => i.productId === p.id || products.find(x => x.id === i.productId)?.parentId === p.id).reduce((a, i) => a + n(i.qty), 0);
   const removeItem = id => setForm(f => ({ ...f, items: f.items.filter(i => i.id !== id) }));
   const subtotalItems = form.items.reduce((a, i) => a + n(i.sub ?? i.subtotal), 0);
   const discountAmt = form.discountType === "pct" ? subtotalItems * Math.min(n(form.discount), 100) / 100 : Math.min(n(form.discount), subtotalItems);
@@ -494,7 +503,7 @@ export function Ventas({ D, A, user, estado }) {
     if (e.key !== "Enter" || !barcodeInput.trim()) return;
     const q2 = barcodeInput.trim().toLowerCase();
     const p = products.find(x => (x.barcode && x.barcode === barcodeInput.trim()) || x.name.toLowerCase() === q2);
-    if (p) { addProductToCart(p.id); setBarcodeInput(""); }
+    if (p) { agregarAlCarrito(p.id); setBarcodeInput(""); }
     else { setErr(`Producto "${barcodeInput.trim()}" no encontrado`); setBarcodeInput(""); }
   };
 
@@ -555,7 +564,7 @@ export function Ventas({ D, A, user, estado }) {
 
   const filtered = sales.filter(s => { const mq = `${s.customerName} ${s.customerMarket} ${s.numero}`.toLowerCase().includes(q.toLowerCase()); const mf = filter === "all" ? !s.anulada : filter === "anuladas" ? s.anulada : !s.anulada && ((filter === "pending" && s.debt > 0) || (filter === "paid" && s.debt === 0)); return mq && mf; }).sort((a, b) => new Date(b.date) - new Date(a.date));
   const vigentes = sales.filter(s => !s.anulada);
-  const posProducts = products.filter(product => (posCategory === "all" || product.cat === posCategory) && `${product.name} ${getCategoryName(categoryOptions, product.cat)}`.toLowerCase().includes(posSearch.toLowerCase()));
+  const posProducts = (D.catalogo || products).filter(product => (posCategory === "all" || product.cat === posCategory) && `${product.name} ${getCategoryName(categoryOptions, product.cat)}`.toLowerCase().includes(posSearch.toLowerCase()));
 
   const calcSaleProfit = (sale) =>
     (sale.items || []).reduce((acc, item) => {
@@ -709,7 +718,7 @@ export function Ventas({ D, A, user, estado }) {
                       <Search size={13} style={{ position: "absolute", left: 9, top: "50%", transform: "translateY(-50%)", color: C.textFaint, pointerEvents: "none" }} />
                       <input value={posSearch} onChange={e => setPosSearch(e.target.value)} placeholder="Buscar producto..." style={{ ...inp, paddingLeft: 28, margin: 0, fontSize: 13 }} />
                     </div>
-                    <BarcodeScannerButton onScan={code => { const p = products.find(x => x.barcode === code || x.name.toLowerCase() === code.toLowerCase()); if (p) addProductToCart(p.id); else setErr(`Código "${code}" no encontrado`); }} />
+                    <BarcodeScannerButton onScan={code => { const p = products.find(x => x.barcode === code || x.name.toLowerCase() === code.toLowerCase()); if (p) agregarAlCarrito(p.id); else setErr(`Código "${code}" no encontrado`); }} />
                   </div>
                   <div style={{ padding: "6px 12px", borderBottom: `1px solid ${C.border}`, flexShrink: 0, display: "flex", gap: 6, overflowX: "auto" }}>
                     {posCategories.map(([v, l]) => (
@@ -722,14 +731,14 @@ export function Ventas({ D, A, user, estado }) {
                         <div style={{ gridColumn: "1/-1", textAlign: "center", padding: 24, color: C.textFaint, fontSize: 12 }}>Sin productos</div>
                       ) : posProducts.map(product => {
                         const stock = getStock(product.id);
-                        const inCart = form.items.find(i => i.productId === product.id);
+                        const enC = enCarrito(product); const inCart = enC > 0 ? { qty: enC } : null;
                         return (
-                          <button key={product.id} onClick={() => addProductToCart(product.id)}
+                          <button key={product.id} onClick={() => agregarAlCarrito(product.id)}
                             style={{ ...card({ padding: 0, overflow: "hidden", cursor: "pointer", border: `1.5px solid ${inCart ? C.brand : C.border}`, transition: "all 0.12s" }), textAlign: "left", outline: "none" }}
                             onMouseEnter={e => e.currentTarget.style.borderColor = C.brand}
                             onMouseLeave={e => e.currentTarget.style.borderColor = inCart ? C.brand : C.border}>
                             <div style={{ height: 80, background: `linear-gradient(135deg,${C.blueBg},${C.bg})`, display: "flex", alignItems: "center", justifyContent: "center", overflow: "hidden", position: "relative" }}>
-                              {product.img ? <img src={product.img} alt={product.name} style={{ width: "100%", height: "100%", objectFit: "cover" }} /> : <BrandLogo size={32} />}
+                              {product.img ? <img src={product.img} alt={product.name} loading="lazy" decoding="async" style={{ width: "100%", height: "100%", objectFit: "cover" }} /> : <BrandLogo size={32} />}
                               {inCart && <div style={{ position: "absolute", top: 4, right: 4, background: C.brand, color: "white", borderRadius: "50%", width: 20, height: 20, fontSize: 10, fontWeight: 700, display: "flex", alignItems: "center", justifyContent: "center" }}>{inCart.qty}</div>}
                               {stock === 0 && <div style={{ position: "absolute", inset: 0, background: "rgba(0,0,0,0.52)", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 9, color: "white", fontWeight: 700, letterSpacing: "0.03em" }}>AGOTADO</div>}
                             </div>
@@ -925,7 +934,7 @@ export function Ventas({ D, A, user, estado }) {
                         <ScanLine size={12} style={{ position: "absolute", left: 9, top: "50%", transform: "translateY(-50%)", color: C.textFaint, pointerEvents: "none" }} />
                         <input ref={barcodeRef} value={barcodeInput} onChange={e => setBarcodeInput(e.target.value)} onKeyDown={handleBarcode} placeholder="Código barras…" style={{ ...inp, paddingLeft: 28, margin: 0, fontSize: 12 }} />
                       </div>
-                      <BarcodeScannerButton onScan={code => { const p = products.find(x => x.barcode === code || x.name.toLowerCase() === code.toLowerCase()); if (p) addProductToCart(p.id); else setErr(`Código "${code}" no encontrado`); }} />
+                      <BarcodeScannerButton onScan={code => { const p = products.find(x => x.barcode === code || x.name.toLowerCase() === code.toLowerCase()); if (p) agregarAlCarrito(p.id); else setErr(`Código "${code}" no encontrado`); }} />
                     </div>
                     <div style={{ padding: "6px 14px", borderBottom: `1px solid ${C.border}`, flexShrink: 0, display: "flex", gap: 4, overflowX: "auto" }}>
                       {posCategories.map(([v, l]) => (
@@ -938,14 +947,14 @@ export function Ventas({ D, A, user, estado }) {
                           <div style={{ gridColumn: "1/-1", textAlign: "center", padding: 24, color: C.textFaint, fontSize: 12 }}>Sin productos</div>
                         ) : posProducts.map(product => {
                           const stock = getStock(product.id);
-                          const inCart = form.items.find(i => i.productId === product.id);
+                          const enC = enCarrito(product); const inCart = enC > 0 ? { qty: enC } : null;
                           return (
-                            <button key={product.id} onClick={() => addProductToCart(product.id)}
+                            <button key={product.id} onClick={() => agregarAlCarrito(product.id)}
                               style={{ ...card({ padding: 0, overflow: "hidden", cursor: "pointer", border: `1.5px solid ${inCart ? C.red : C.border}`, transition: "all 0.12s" }), textAlign: "left", outline: "none" }}
                               onMouseEnter={e => e.currentTarget.style.borderColor = C.red}
                               onMouseLeave={e => e.currentTarget.style.borderColor = inCart ? C.red : C.border}>
                               <div style={{ height: 78, background: `linear-gradient(135deg,${C.blueBg},${C.bg})`, display: "flex", alignItems: "center", justifyContent: "center", overflow: "hidden", position: "relative" }}>
-                                {product.img ? <img src={product.img} alt={product.name} style={{ width: "100%", height: "100%", objectFit: "cover" }} /> : <BrandLogo size={36} />}
+                                {product.img ? <img src={product.img} alt={product.name} loading="lazy" decoding="async" style={{ width: "100%", height: "100%", objectFit: "cover" }} /> : <BrandLogo size={36} />}
                                 {inCart && <div style={{ position: "absolute", top: 4, right: 4, background: C.red, color: "white", borderRadius: "50%", width: 18, height: 18, fontSize: 10, fontWeight: 700, display: "flex", alignItems: "center", justifyContent: "center" }}>{inCart.qty}</div>}
                                 {stock === 0 && <div style={{ position: "absolute", inset: 0, background: "rgba(0,0,0,0.52)", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 9, color: "white", fontWeight: 700, letterSpacing: "0.03em" }}>AGOTADO</div>}
                               </div>
@@ -1105,6 +1114,7 @@ export function Ventas({ D, A, user, estado }) {
         </div>
       </Modal>}
       {comprobanteVenta && <ComprobanteModal sale={comprobanteVenta} config={config} user={user} products={D.products} onClose={() => setComprobanteVenta(null)} />}
+      {eligiendoVariante && <SelectorVariante grupo={eligiendoVariante} variantes={D.variantesDe?.get(eligiendoVariante.id) || []} onClose={() => setEligiendoVariante(null)} onElegir={v => { addProductToCart(v.id); setEligiendoVariante(null); }} />}
     </div>
   );
 }
