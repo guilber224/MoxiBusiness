@@ -14,6 +14,7 @@ import { Modal } from "./ui/Modal.jsx";
 import { Table } from "./ui/Table.jsx";
 import { PagarSuscripcion } from "./PagarSuscripcion.jsx";
 import { planIncluye } from "../services/cobrosService.js";
+import { ReiniciarDatos } from "./ReiniciarDatos.jsx";
 
 const ROLES = [
   { id: "admin", label: "Administrador", desc: "Acceso total, incluida la configuración y el equipo" },
@@ -59,7 +60,7 @@ export function ImagenEmpresa({ titulo, ayuda, url, nombre, campo, A, puedeEdita
   );
 }
 
-export function UsuariosAdmin({ D, A, user, onProfileUpdate, suscripcion, onSuscripcion, miPlan }) {
+export function UsuariosAdmin({ D, A, user, onProfileUpdate, suscripcion, onSuscripcion, miPlan, setTab }) {
   const [verSuscripcion, setVerSuscripcion] = useState(false);
   const { users, config, activityLogs } = D;
   const admin = isAdmin(user) || user?.role === "superadmin";
@@ -220,6 +221,8 @@ export function UsuariosAdmin({ D, A, user, onProfileUpdate, suscripcion, onSusc
             { key: "action", label: "Acción" },
           ]} rows={(activityLogs || []).slice(0, 100)} />}
       </div>}
+
+      {admin && <ReiniciarDatos A={A} config={config} setTab={setTab} />}
 
       {modal && <Modal title="Nuevo usuario" onClose={() => !guardando && setModal(false)}>
         <div style={row()}>

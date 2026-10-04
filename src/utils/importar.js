@@ -16,10 +16,21 @@ export const PLANTILLAS = {
       { campo: "categoria", encabezado: "Categoría", alias: ["categoria", "rubro", "familia", "grupo", "linea", "tipo"] },
       { campo: "codigo", encabezado: "Código de barras", alias: ["codigo de barras", "codigo", "cod", "barcode", "sku", "ean", "referencia"] },
       { campo: "descripcion", encabezado: "Descripción", alias: ["descripcion", "detalle", "observaciones"] },
+      // Variantes: si un producto tiene talla/color/sabor, cada fila es una variante del mismo producto
+      { campo: "talla", encabezado: "Talla", atributo: "Talla", alias: ["talla", "talle", "numero de calzado", "medida de prenda"] },
+      { campo: "color", encabezado: "Color", atributo: "Color", alias: ["color", "colour"] },
+      { campo: "sabor", encabezado: "Sabor", atributo: "Sabor", alias: ["sabor", "aroma", "tamano", "presentacion", "modelo"] },
+      // Lotes: cada fila es un lote (un medicamento con 2 lotes va en 2 filas)
+      { campo: "lote", encabezado: "Lote", alias: ["lote", "n lote", "nro lote", "numero de lote", "batch"] },
+      { campo: "vencimiento", encabezado: "Vencimiento", fecha: true, alias: ["vencimiento", "fecha de vencimiento", "vence", "caducidad", "fecha vencimiento", "f venc", "expira"] },
     ],
     ejemplo: [
       { "Nombre": "Arroz grano de oro 1 kg", "Precio de venta": 12.5, "Costo": 9, "Stock inicial": 40, "Stock mínimo": 5, "Unidad": "bolsa", "Categoría": "Abarrotes", "Código de barras": "7771234500011", "Descripción": "" },
       { "Nombre": "Aceite 900 ml", "Precio de venta": 18, "Costo": 14.5, "Stock inicial": 24, "Stock mínimo": 6, "Unidad": "botella", "Categoría": "Abarrotes", "Código de barras": "", "Descripción": "" },
+      { "Nombre": "Polera básica", "Precio de venta": 80, "Costo": 45, "Stock inicial": 5, "Unidad": "unidad", "Categoría": "Ropa", "Talla": "S", "Color": "Rojo" },
+      { "Nombre": "Polera básica", "Precio de venta": 80, "Costo": 45, "Stock inicial": 3, "Unidad": "unidad", "Categoría": "Ropa", "Talla": "M", "Color": "Rojo" },
+      { "Nombre": "Paracetamol 500 mg", "Precio de venta": 1, "Costo": 0.4, "Stock inicial": 100, "Unidad": "tableta", "Categoría": "Farmacia", "Lote": "L2405", "Vencimiento": "30/11/2026" },
+      { "Nombre": "Paracetamol 500 mg", "Precio de venta": 1, "Costo": 0.4, "Stock inicial": 200, "Unidad": "tableta", "Categoría": "Farmacia", "Lote": "L2511", "Vencimiento": "31/05/2027" },
     ],
     limite: 3000,
   },
@@ -59,6 +70,20 @@ export function mapearEncabezados(encabezados, tipo) {
   return { mapa, faltan };
 }
 
+// Fecha de Excel (número de serie), "30/11/2026", "2026-11-30" o "11/2026" (fin de mes) → "2026-11-30" (null si vacío, NaN si inválida)
+export function aFecha(v) {
+  if (v == null || v === "") return null;
+  const dos = n => String(n).padStart(2, "0");
+  const armar = (y, m, d) => { const f = new Date(y, m - 1, d); return f.getFullYear() === y && f.getMonth() === m - 1 && f.getDate() === d ? `${y}-${dos(m)}-${dos(d)}` : NaN; };
+  if (typeof v === "number") { const f = new Date(Math.round((v - 25569) * 86400000)); return Number.isFinite(f.getTime()) && v > 20000 ? armar(f.getUTCFullYear(), f.getUTCMonth() + 1, f.getUTCDate()) : NaN; }
+  if (v instanceof Date) return armar(v.getFullYear(), v.getMonth() + 1, v.getDate());
+  const t = String(v).trim();
+  let m = t.match(/^(\d{4})-(\d{1,2})-(\d{1,2})/); if (m) return armar(+m[1], +m[2], +m[3]);
+  m = t.match(/^(\d{1,2})[/.-](\d{1,2})[/.-](\d{2,4})$/); if (m) return armar(m[3].length === 2 ? 2000 + +m[3] : +m[3], +m[2], +m[1]);
+  m = t.match(/^(\d{1,2})[/.-](\d{4})$/); if (m) return armar(+m[2], +m[1], new Date(+m[2], +m[1], 0).getDate());
+  return NaN;
+}
+
 // "1.250,50" · "1,250.50" · "Bs 12" · 12 → número (o null si no hay valor)
 export function aNumero(v) {
   if (v == null || v === "") return null;
@@ -89,12 +114,21 @@ export function prepararFilas(filas, mapa, tipo) {
           if (Number.isNaN(n)) errores.push(`${col.encabezado}: "${v}" no es un número`);
           else if (n != null && n < 0) errores.push(`${col.encabezado} no puede ser negativo`);
           else datos[campo] = n == null ? "" : String(n);
+        } else if (col.fecha) {
+          const fch = aFecha(v);
+          if (Number.isNaN(fch)) errores.push(`${col.encabezado}: "${v}" no es una fecha válida (usa 30/11/2026)`);
+          else datos[campo] = fch || "";
         } else datos[campo] = String(v ?? "").trim();
       });
+      // Talla/Color/Sabor → variante del producto, en el orden de las columnas
+      const variante = cols.filter(c => c.atributo && datos[c.campo]).map(c => ({ nombre: c.atributo, valor: datos[c.campo] }));
+      cols.filter(c => c.atributo).forEach(c => delete datos[c.campo]);
+      if (variante.length) datos.variante = variante;
       if (!datos.nombre) errores.push("Falta el nombre");
       if (tipo === "productos" && (datos.precio === "" || datos.precio == null) && !errores.some(e => e.startsWith("Precio"))) errores.push("Falta el precio de venta");
       // Repetidos dentro del mismo archivo
-      const clave = tipo === "productos" && datos.codigo ? `c:${datos.codigo}` : `n:${normalizar(datos.nombre)}`;
+      const clave = tipo === "productos" && datos.codigo ? `c:${datos.codigo}`
+        : `n:${normalizar(datos.nombre)}|${(datos.variante || []).map(x => normalizar(x.valor)).join("/")}|${normalizar(datos.lote)}|${datos.vencimiento || ""}`;
       if (datos.nombre) {
         if (vistos.has(clave)) errores.push(`Repetido (igual a la fila ${vistos.get(clave)})`);
         else vistos.set(clave, fila);

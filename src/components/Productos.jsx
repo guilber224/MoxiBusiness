@@ -13,6 +13,9 @@ import { Modal } from "./ui/Modal.jsx";
 import { SearchInput } from "./ui/SearchInput.jsx";
 import { ImportarExcel } from "./ImportarExcel.jsx";
 import { VariantesEditor } from "./VariantesEditor.jsx";
+import { useMostrarMas } from "../hooks/useMostrarMas.js";
+import { BotonMostrarMas } from "./ui/BotonMostrarMas.jsx";
+
 
 const SIN_CATEGORIA = { id: DEFAULT_CATEGORY_ID, name: "Sin categoría", locked: true };
 const FORM_VACIO = { name: "", cat: DEFAULT_CATEGORY_ID, unit: "", price: "", cost: "", minStock: "", desc: "", img: null, barcode: "", lotControl: false, conVariantes: false };
@@ -37,6 +40,8 @@ export function Productos({ D, A, user }) {
 
   const filtered = products.filter(p => (cat === "all" || p.cat === cat)
     && `${p.name} ${p.barcode} ${(variantesDe.get(p.id) || []).map(v => v.barcode).join(" ")}`.toLowerCase().includes(q.toLowerCase()));
+
+  const pag = useMostrarMas(filtered, 60, q + "|" + cat);
 
   const openForm = (product = null) => {
     setErr(""); setArchivo(null);
@@ -137,7 +142,7 @@ export function Productos({ D, A, user }) {
           action={!products.length && <button onClick={() => openForm()} style={mkBtn("primary")}>+ Crear producto</button>} />
       ) : (
         <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill,minmax(190px,1fr))", gap: 10 }}>
-          {filtered.map(p => {
+          {pag.visibles.concat(pag.restantes ? [{ __mas: true, id: "__mas" }] : []).map(p => { if (p.__mas) return <div key="__mas" style={{ gridColumn: "1 / -1" }}><BotonMostrarMas restantes={pag.restantes} onClick={pag.mostrarMas} /></div>;
             const agotado = p.stock <= 0;
             const bajo = !agotado && p.minStock > 0 && p.stock <= p.minStock;
             return (

@@ -75,6 +75,7 @@ export function ImportarExcel({ tipo, A, onClose, onListo, incrustado = false })
             <span style={{ fontWeight: 800, color: "#111E7B" }}>1</span>
             <div style={{ flex: 1, fontSize: 13 }}>
               Descarga la plantilla y llénala (o usa tu propio Excel: reconocemos columnas como <em>Producto, Precio, Stock, Código</em>).
+              {tipo === "productos" && <div style={{ fontSize: 12, color: C.textFaint, marginTop: 4 }}>Opcional: columnas <strong>Talla / Color / Sabor</strong> (cada fila es una variante del mismo producto) y <strong>Lote / Vencimiento</strong> (cada fila es un lote).</div>}
               <div style={{ marginTop: 8 }}><button onClick={descargarPlantilla} style={mkBtn("ghost")}><Download size={14} /> Descargar plantilla</button></div>
             </div>
           </div>
@@ -107,6 +108,7 @@ export function ImportarExcel({ tipo, A, onClose, onListo, incrustado = false })
               <thead style={{ position: "sticky", top: 0, background: "var(--color-bg-surface)" }}>
                 <tr>
                   <th style={{ textAlign: "left", padding: "6px 8px" }}>Fila</th>
+                  {filas.some(f => f.datos.variante) && <th style={{ textAlign: "left", padding: "6px 8px" }}>Variante</th>}
                   {P.columnas.filter(c => filas.some(f => f.datos[c.campo])).map(c => <th key={c.campo} style={{ textAlign: "left", padding: "6px 8px", whiteSpace: "nowrap" }}>{c.encabezado}</th>)}
                   <th style={{ textAlign: "left", padding: "6px 8px" }}>Estado</th>
                 </tr>
@@ -115,6 +117,7 @@ export function ImportarExcel({ tipo, A, onClose, onListo, incrustado = false })
                 {[...conError, ...validas].slice(0, 200).map(f => (
                   <tr key={f.fila} style={{ borderTop: `1px solid ${C.border}`, background: f.errores.length ? "rgba(239,68,68,0.06)" : undefined }}>
                     <td style={{ padding: "5px 8px", color: C.textFaint }}>{f.fila}</td>
+                    {filas.some(x => x.datos.variante) && <td style={{ padding: "5px 8px", whiteSpace: "nowrap", fontWeight: 600 }}>{(f.datos.variante || []).map(v => v.valor).join(" / ")}</td>}
                     {P.columnas.filter(c => filas.some(x => x.datos[c.campo])).map(c => <td key={c.campo} style={{ padding: "5px 8px", maxWidth: 180, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{f.datos[c.campo]}</td>)}
                     <td style={{ padding: "5px 8px", color: f.errores.length ? C.red : C.green, whiteSpace: "nowrap" }}>{f.errores.length ? f.errores.join(" · ") : "OK"}</td>
                   </tr>
@@ -144,7 +147,7 @@ export function ImportarExcel({ tipo, A, onClose, onListo, incrustado = false })
           <div style={{ fontWeight: 800, fontSize: 16 }}>Importación terminada</div>
         </div>
         <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(120px,1fr))", gap: 8, marginBottom: 12 }}>
-          {[["Nuevos", resultado.creados, C.green], ["Actualizados", resultado.actualizados, "#111E7B"], ["Ya existían (omitidos)", resultado.omitidos, C.textMid], ...(resultado.categorias_nuevas ? [["Categorías nuevas", resultado.categorias_nuevas, C.textMid]] : [])].map(([t, v, col]) => (
+          {[["Nuevos", resultado.creados, C.green], ["Actualizados", resultado.actualizados, "#111E7B"], ...(resultado.variantes ? [["Variantes nuevas", resultado.variantes, C.green]] : []), ...(resultado.lotes ? [["Lotes ingresados", resultado.lotes, C.green]] : []), ["Ya existían (omitidos)", resultado.omitidos, C.textMid], ...(resultado.categorias_nuevas ? [["Categorías nuevas", resultado.categorias_nuevas, C.textMid]] : [])].map(([t, v, col]) => (
             <div key={t} style={{ ...card(), padding: 12 }}><div style={{ fontSize: 22, fontWeight: 800, color: col }}>{v || 0}</div><div style={{ fontSize: 12, color: C.textFaint }}>{t}</div></div>
           ))}
         </div>

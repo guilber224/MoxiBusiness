@@ -29,12 +29,26 @@ const rpc = async (fn, args) => ok(await supabase.rpc(fn, args));
 const desdeMeses = (m) => { const d = new Date(); d.setMonth(d.getMonth() - m); return d.toISOString(); };
 
 // ── Carga completa (en paralelo; cada parte falla de forma independiente) ────
+// Supabase devuelve como máximo 1000 filas por consulta: los catálogos grandes se traen por páginas.
+// (orden estable por nombre + id para no saltar ni repetir filas entre páginas)
+async function todasLasFilas(crear, tam = 1000, max = 20000) {
+  // Primera página + total; si hay más, el resto se pide en paralelo (no una tras otra)
+  const primera = await crear(true).range(0, tam - 1);
+  if (primera.error) return { data: null, error: primera.error };
+  const total = Math.min(primera.count ?? (primera.data || []).length, max);
+  if (total <= tam) return { data: primera.data || [], error: null };
+  const resto = await Promise.all(Array.from({ length: Math.ceil(total / tam) - 1 }, (_, k) => crear(false).range((k + 1) * tam, (k + 2) * tam - 1)));
+  const err = resto.find(r => r.error);
+  if (err) return { data: null, error: err.error };
+  return { data: [...(primera.data || []), ...resto.flatMap(r => r.data || [])], error: null };
+}
+
 export async function cargarTodo(empresaId) {
   const q = {
     config:     supabase.from("empresas").select(EMPRESA_COLS).eq("id", empresaId).maybeSingle(),
-    products:   supabase.from("productos").select(PRODUCTO_COLS).eq("activo", true).order("nombre"),
+    products:   todasLasFilas(t => supabase.from("productos").select(PRODUCTO_COLS, t ? { count: "exact" } : undefined).eq("activo", true).order("nombre").order("id")),
     categories: supabase.from("categorias").select("id,nombre").eq("tipo", "PRODUCTO").order("nombre"),
-    customers:  supabase.from("clientes").select(CLIENTE_COLS).eq("activo", true).order("nombre"),
+    customers:  todasLasFilas(t => supabase.from("clientes").select(CLIENTE_COLS, t ? { count: "exact" } : undefined).eq("activo", true).order("nombre").order("id")),
     sales:      supabase.from("ventas").select(VENTA_SELECT).gte("fecha", desdeMeses(12)).order("fecha", { ascending: false }).limit(2000),
     expenses:   supabase.from("gastos").select(GASTO_COLS).gte("fecha", desdeMeses(12).slice(0, 10)).order("fecha", { ascending: false }).limit(2000),
     movements:  supabase.from("movimientos_inventario").select(MOV_COLS).order("created_at", { ascending: false }).limit(300),
@@ -46,7 +60,7 @@ export async function cargarTodo(empresaId) {
     users:      supabase.from("usuarios").select("id,nombre,email,role,activo,created_at").order("nombre"),
     activityLogs: supabase.from("activity_logs").select("id,usuario_id,usuario_nombre,accion,detalle,created_at").order("created_at", { ascending: false }).limit(200),
     caja:       supabase.rpc("caja_resumen"),
-    lotes:      supabase.from("lotes").select(LOTE_COLS).gt("cantidad", 0).order("vencimiento", { ascending: true, nullsFirst: false }).limit(5000),
+    lotes:      todasLasFilas(t => supabase.from("lotes").select(LOTE_COLS, t ? { count: "exact" } : undefined).gt("cantidad", 0).order("vencimiento", { ascending: true, nullsFirst: false }).order("id")),
   };
   const mapeo = {
     config: r => (r ? toConfig(r) : null), products: rs => rs.map(toProduct), categories: rs => rs.map(toCategory),
@@ -136,7 +150,7 @@ export const ventas = {
 
 // ── Inventario ─────────────────────────────────────────────────────────────
 export const lotes = {
-  async listar() { return ok(await supabase.from("lotes").select(LOTE_COLS).gt("cantidad", 0).order("vencimiento", { ascending: true, nullsFirst: false }).limit(5000)).map(toLote); },
+  async listar() { return ok(await todasLasFilas(t => supabase.from("lotes").select(LOTE_COLS, t ? { count: "exact" } : undefined).gt("cantidad", 0).order("vencimiento", { ascending: true, nullsFirst: false }).order("id"))).map(toLote); },
   // Entrada con número de lote y vencimiento (usa el mismo stock_movimiento del servidor)
   async ingresar(productoId, cantidad, lote, vencimiento, costo, notas) {
     return toProduct(await rpc("lote_ingresar", { p_producto: productoId, p_cantidad: Number(cantidad), p_lote: lote || null, p_vencimiento: vencimiento || null, p_costo: costo ? Number(costo) : null, p_notas: notas || null }));
@@ -223,6 +237,8 @@ export const importar = {
 };
 
 export const empresa = {
+  // Empezar de cero: borra los módulos elegidos (confirmación = nombre de la empresa)
+  async reiniciar(modulos, confirmacion) { return rpc("empresa_reiniciar", { p_modulos: modulos, p_confirmacion: confirmacion }); },
   async onboarding(completado = true) { ok(await supabase.rpc("empresa_onboarding", { p_completado: completado })); },
   async actualizar(empresaId, config) {
     const cambios = Object.fromEntries(Object.entries(fromConfig(config)).filter(([, v]) => v !== undefined));

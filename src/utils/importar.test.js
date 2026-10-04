@@ -53,3 +53,35 @@ describe("prepararFilas", () => {
     expect(r[4].errores[0]).toMatch(/negativo/);
   });
 });
+
+describe("fechas, variantes y lotes", async () => {
+  const { aFecha } = await import("./importar.js");
+  it("lee fechas de Excel y escritas a mano", () => {
+    expect(aFecha(46356)).toBe("2026-11-30");          // número de serie de Excel
+    expect(aFecha("30/11/2026")).toBe("2026-11-30");
+    expect(aFecha("30-11-26")).toBe("2026-11-30");
+    expect(aFecha("2026-11-30")).toBe("2026-11-30");
+    expect(aFecha("11/2026")).toBe("2026-11-30");      // mes/año: fin de mes
+    expect(aFecha("")).toBe(null);
+    expect(Number.isNaN(aFecha("31/02/2026"))).toBe(true);
+    expect(Number.isNaN(aFecha("pronto"))).toBe(true);
+  });
+  it("talla y color forman la variante; lotes distintos del mismo producto no son repetidos", () => {
+    const { mapa } = mapearEncabezados(["Producto", "Precio", "Stock", "Talla", "Color", "Lote", "Vencimiento"], "productos");
+    const r = prepararFilas([
+      ["Polera", "80", "5", "S", "Rojo", "", ""],
+      ["Polera", "80", "3", "M", "Rojo", "", ""],
+      ["Polera", "80", "1", "S", "Rojo", "", ""],
+      ["Paracetamol", "1", "100", "", "", "L1", "30/11/2026"],
+      ["Paracetamol", "1", "200", "", "", "L2", "31/05/2027"],
+      ["Paracetamol", "1", "5", "", "", "L3", "31/13/2027"],
+    ], mapa, "productos");
+    expect(r[0].datos.variante).toEqual([{ nombre: "Talla", valor: "S" }, { nombre: "Color", valor: "Rojo" }]);
+    expect(r[0].datos.talla).toBeUndefined();
+    expect(r[1].errores).toEqual([]);
+    expect(r[2].errores[0]).toMatch(/Repetido/);
+    expect(r[3].datos).toMatchObject({ lote: "L1", vencimiento: "2026-11-30" });
+    expect(r[4].errores).toEqual([]);
+    expect(r[5].errores[0]).toMatch(/fecha válida/);
+  });
+});

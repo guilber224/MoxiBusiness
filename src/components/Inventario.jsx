@@ -12,6 +12,9 @@ import { KPI } from "./ui/KPI.jsx";
 import { Table } from "./ui/Table.jsx";
 import { Chip } from "./ui/Chip.jsx";
 import { SelectorProducto } from "./ui/SelectorProducto.jsx";
+import { useMostrarMas } from "../hooks/useMostrarMas.js";
+import { BotonMostrarMas } from "./ui/BotonMostrarMas.jsx";
+
 import { diasParaVencer, estadoVencimiento, ordenarLotes } from "../utils/lotes.js";
 import { fDate } from "../utils/businessLogic.js";
 
@@ -42,6 +45,7 @@ export function Inventario({ D, A }) {
 
   const allRows = products.map(p => ({ ...p, level: nivel(p) }));
   const rows = allRows.filter(p => (filter === "all" || p.level === filter) && (!q || p.name.toLowerCase().includes(q.toLowerCase())));
+  const pag = useMostrarMas(rows, 100, q + "|" + filter);
   const valorVenta = products.reduce((a, p) => a + Math.max(0, p.stock) * p.price, 0);
   const valorCosto = products.reduce((a, p) => a + Math.max(0, p.stock) * p.cost, 0);
   const agotados = allRows.filter(p => p.level === "empty");
@@ -129,7 +133,8 @@ export function Inventario({ D, A }) {
           { key: "stock", label: "Valor", render: (v, r) => <span style={{ fontWeight: 700, color: C.blue }}>{Bs(Math.max(0, v) * r.price)}</span> },
           { key: "minStock", label: "Mínimo", render: (v, r) => (v > 0 ? `${v} ${r.unit}` : "—") },
           { key: "level", label: "Estado", render: v => <span style={mkBadge(NIVEL_BADGE[v])}>{NIVEL_TXT[v]}</span> },
-        ]} rows={rows} />
+        ]} rows={pag.visibles} />
+        <BotonMostrarMas restantes={pag.restantes} onClick={pag.mostrarMas} paso={100} />
       </div>
 
       <div style={{ ...card(), marginTop: 14 }}>

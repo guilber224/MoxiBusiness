@@ -12,6 +12,9 @@ import { Table } from "./ui/Table.jsx";
 import { SearchInput } from "./ui/SearchInput.jsx";
 import { KPI } from "./ui/KPI.jsx";
 import { ImportarExcel } from "./ImportarExcel.jsx";
+import { useMostrarMas } from "../hooks/useMostrarMas.js";
+import { BotonMostrarMas } from "./ui/BotonMostrarMas.jsx";
+
 
 // ╔══════════════════════════════════════════════════════════════════════╗
 // ║  CLIENTES                                                           ║
@@ -29,6 +32,7 @@ export function Clientes({ D, A, user }) {
   const [ejecutar, guardando] = useAccion();
 
   const filtered=customers.filter(c=>`${c.name} ${c.market} ${c.phone} ${c.ci}`.toLowerCase().includes(q.toLowerCase()));
+  const pag = useMostrarMas(filtered, 80, q);
   const openForm=(c=null)=>{ setErr(""); setForm(c?{...c}:{name:"",phone:"",address:"",market:"",ci:"",notes:""}); setModal(c||"new"); };
   const doSave = async () => {
     if (!form.name.trim()) { setErr("El nombre es obligatorio"); return; }
@@ -114,7 +118,7 @@ export function Clientes({ D, A, user }) {
         <SearchInput value={q} onChange={setQ} placeholder="Buscar por nombre, mercado, teléfono o CI..."/>
       </div>
       {filtered.length===0?<Empty icon="👥" title="Sin clientes" sub={q?"Sin resultados":"Agrega tu primer cliente"} action={!q&&<button onClick={()=>openForm()} style={mkBtn("primary")}>+ Agregar cliente</button>}/>:
-        filtered.map(c=>{
+        pag.visibles.concat(pag.restantes ? [{ __mas: true, id: "__mas" }] : []).map(c=>{ if (c.__mas) return <div key="__mas" style={{ gridColumn: "1 / -1" }}><BotonMostrarMas restantes={pag.restantes} onClick={pag.mostrarMas} /></div>;
           const debt=sales.filter(s=>s.customerId===c.id).reduce((a,s)=>a+s.debt,0);
           const cnt=sales.filter(s=>s.customerId===c.id).length;
           return (

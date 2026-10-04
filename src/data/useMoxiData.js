@@ -259,6 +259,7 @@ export function useMoxiData(user) {
         mutar("products", ps => porId(ps, r)); refrescarKardex(); refrescarLotes();
         return r;
       },
+      reiniciarDatos: async (modulos, confirmacion) => { const r = await api.empresa.reiniciar(modulos, confirmacion); await cargar(); return r; },
       importarProductos: async (filas, actualizar) => { const r = await api.importar.productos(filas, actualizar); await cargar(); return r; },
       importarClientes: async (filas, actualizar) => { const r = await api.importar.clientes(filas, actualizar); await cargar(); return r; },
       completarOnboarding: async (completado = true) => { await api.empresa.onboarding(completado); setData(d => ({ ...d, config: { ...d.config, onboardingCompletado: completado } })); },

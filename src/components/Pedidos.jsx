@@ -14,6 +14,8 @@ import { Modal } from "./ui/Modal.jsx";
 import { Empty } from "./ui/Empty.jsx";
 import { Header } from "./ui/Header.jsx";
 import { SearchInput } from "./ui/SearchInput.jsx";
+import { useMostrarMas } from "../hooks/useMostrarMas.js";
+import { BotonMostrarMas } from "./ui/BotonMostrarMas.jsx";
 import { SelectorVariante } from "./ui/SelectorVariante.jsx";
 
 const ESTADOS_COTIZACION = [
@@ -206,6 +208,7 @@ export function Pedidos({ D, A, user }) {
   const [eligiendoVariante, setEligiendoVariante] = useState(null);
   const agregarAlCarrito = id => { const p = products.find(x => x.id === id); if (p?.isGroup) setEligiendoVariante(p); else addProductToCart(id); };
   const posProducts = (D.catalogo || products).filter(p => (posCategory === "all" || p.cat === posCategory) && `${p.name} ${getCategoryName(categoryOptions, p.cat)}`.toLowerCase().includes(posSearch.toLowerCase()));
+  const posPag = useMostrarMas(posProducts, 60, posSearch + "|" + posCategory);
 
   const subtotal = form.items.reduce((a, i) => a + n(i.qty) * n(i.unitPrice), 0);
   const discountAmt = form.discountType === "pct" ? subtotal * Math.min(n(form.discount), 100) / 100 : Math.min(n(form.discount), subtotal);
@@ -462,7 +465,7 @@ export function Pedidos({ D, A, user }) {
             <div style={{ display: "grid", gridTemplateColumns: isMobile ? "repeat(2,1fr)" : "repeat(3,1fr)", gap: 8 }}>
               {posProducts.length === 0 ? (
                 <div style={{ gridColumn: "1/-1", textAlign: "center", padding: 20, color: C.textFaint, fontSize: 12 }}>Sin productos</div>
-              ) : posProducts.map(product => {
+              ) : posPag.visibles.concat(posPag.restantes ? [{ __mas: true, id: "__mas" }] : []).map(product => { if (product.__mas) return <div key="__mas" style={{ gridColumn: "1 / -1" }}><BotonMostrarMas restantes={posPag.restantes} onClick={posPag.mostrarMas} /></div>;
                 const inCart = form.items.find(i => i.productId === product.id);
                 return (
                   <button key={product.id} type="button" onClick={() => agregarAlCarrito(product.id)}

@@ -16,6 +16,8 @@ import { Empty } from "./ui/Empty.jsx";
 import { Header } from "./ui/Header.jsx";
 import { Table } from "./ui/Table.jsx";
 import { SearchInput } from "./ui/SearchInput.jsx";
+import { useMostrarMas } from "../hooks/useMostrarMas.js";
+import { BotonMostrarMas } from "./ui/BotonMostrarMas.jsx";
 import { SelectorVariante } from "./ui/SelectorVariante.jsx";
 import { imprimirTicket, leerAnchoTicket, guardarAnchoTicket, leerAutoTicket, guardarAutoTicket } from "../utils/ticketTermico.js";
 import { Chip } from "./ui/Chip.jsx";
@@ -565,6 +567,7 @@ export function Ventas({ D, A, user, estado }) {
   const filtered = sales.filter(s => { const mq = `${s.customerName} ${s.customerMarket} ${s.numero}`.toLowerCase().includes(q.toLowerCase()); const mf = filter === "all" ? !s.anulada : filter === "anuladas" ? s.anulada : !s.anulada && ((filter === "pending" && s.debt > 0) || (filter === "paid" && s.debt === 0)); return mq && mf; }).sort((a, b) => new Date(b.date) - new Date(a.date));
   const vigentes = sales.filter(s => !s.anulada);
   const posProducts = (D.catalogo || products).filter(product => (posCategory === "all" || product.cat === posCategory) && `${product.name} ${getCategoryName(categoryOptions, product.cat)}`.toLowerCase().includes(posSearch.toLowerCase()));
+  const posPag = useMostrarMas(posProducts, 60, posSearch + "|" + posCategory);
 
   const calcSaleProfit = (sale) =>
     (sale.items || []).reduce((acc, item) => {
@@ -729,7 +732,7 @@ export function Ventas({ D, A, user, estado }) {
                     <div style={{ display: "grid", gridTemplateColumns: "repeat(2,1fr)", gap: 10 }}>
                       {posProducts.length === 0 ? (
                         <div style={{ gridColumn: "1/-1", textAlign: "center", padding: 24, color: C.textFaint, fontSize: 12 }}>Sin productos</div>
-                      ) : posProducts.map(product => {
+                      ) : posPag.visibles.concat(posPag.restantes ? [{ __mas: true, id: "__mas" }] : []).map(product => { if (product.__mas) return <div key="__mas" style={{ gridColumn: "1 / -1" }}><BotonMostrarMas restantes={posPag.restantes} onClick={posPag.mostrarMas} /></div>;
                         const stock = getStock(product.id);
                         const enC = enCarrito(product); const inCart = enC > 0 ? { qty: enC } : null;
                         return (
@@ -945,7 +948,7 @@ export function Ventas({ D, A, user, estado }) {
                       <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill,minmax(120px,1fr))", gap: 8 }}>
                         {posProducts.length === 0 ? (
                           <div style={{ gridColumn: "1/-1", textAlign: "center", padding: 24, color: C.textFaint, fontSize: 12 }}>Sin productos</div>
-                        ) : posProducts.map(product => {
+                        ) : posPag.visibles.concat(posPag.restantes ? [{ __mas: true, id: "__mas" }] : []).map(product => { if (product.__mas) return <div key="__mas" style={{ gridColumn: "1 / -1" }}><BotonMostrarMas restantes={posPag.restantes} onClick={posPag.mostrarMas} /></div>;
                           const stock = getStock(product.id);
                           const enC = enCarrito(product); const inCart = enC > 0 ? { qty: enC } : null;
                           return (
