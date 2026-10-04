@@ -17,6 +17,8 @@ import { SearchInput } from "./ui/SearchInput.jsx";
 import { useMostrarMas } from "../hooks/useMostrarMas.js";
 import { BotonMostrarMas } from "./ui/BotonMostrarMas.jsx";
 import { SelectorVariante } from "./ui/SelectorVariante.jsx";
+import { SelectorCantidad } from "./ui/SelectorCantidad.jsx";
+import { precioSugerido } from "../utils/precios.js";
 
 const ESTADOS_COTIZACION = [
   { id: "borrador",  label: "Borrador",  badge: "gray"  },
@@ -197,16 +199,19 @@ export function Pedidos({ D, A, user }) {
     })
   }));
   const removeItem = id => setForm(f => ({ ...f, items: f.items.filter(i => i.id !== id) }));
-  const addProductToCart = productId => setForm(f => {
+  const addProductToCart = (productId, opts = {}) => setForm(f => {
     const product = products.find(p => p.id === productId); if (!product) return f;
-    const existing = f.items.find(i => i.productId === productId);
-    if (existing) return { ...f, items: f.items.map(i => i.id === existing.id ? { ...i, qty: n(i.qty) + 1 } : i) };
-    return { ...f, items: [...f.items, { id: uid(), productId, qty: 1, unitPrice: product.price }] };
+    const pres = opts.presentation || null; const qtyAdd = n(opts.qty) || 1;
+    const existing = f.items.find(i => i.productId === productId && (i.presentation || null) === (pres?.name || null));
+    if (existing) return { ...f, items: f.items.map(i => i.id === existing.id ? { ...i, qty: n(i.qty) + qtyAdd } : i) };
+    return { ...f, items: [...f.items, { id: uid(), productId, qty: qtyAdd, unitPrice: precioSugerido(product, qtyAdd, pres), presentation: pres?.name || null, factor: pres?.factor || 1 }] };
   });
+  const [eligiendoCantidad, setEligiendoCantidad] = useState(null);
+  const agregarProducto = p => { if (p.fraction || (D.presentacionesDe?.get(p.id) || []).length) setEligiendoCantidad(p); else addProductToCart(p.id); };
   const posCategories = [["all", "Todos"], ...categoryOptions.map(c => [c.id, c.name])];
   // Productos con variantes: se elige talla/color antes de agregar
   const [eligiendoVariante, setEligiendoVariante] = useState(null);
-  const agregarAlCarrito = id => { const p = products.find(x => x.id === id); if (p?.isGroup) setEligiendoVariante(p); else addProductToCart(id); };
+  const agregarAlCarrito = id => { const p = products.find(x => x.id === id); if (p?.isGroup) setEligiendoVariante(p); else if (p) agregarProducto(p); };
   const posProducts = (D.catalogo || products).filter(p => (posCategory === "all" || p.cat === posCategory) && `${p.name} ${getCategoryName(categoryOptions, p.cat)}`.toLowerCase().includes(posSearch.toLowerCase()));
   const posPag = useMostrarMas(posProducts, 60, posSearch + "|" + posCategory);
 
@@ -221,7 +226,7 @@ export function Pedidos({ D, A, user }) {
     setForm({
       tipo: doc.tipo, estado: doc.estado, customerId: doc.customerId || "__guest__",
       date: (doc.date || today()).slice(0, 10), validUntil: (doc.validUntil || "").slice(0, 10), deliveryDate: (doc.deliveryDate || "").slice(0, 10),
-      items: (doc.items || []).map(it => ({ id: it.id || uid(), productId: it.productId, qty: it.qty, unitPrice: it.unitPrice })),
+      items: (doc.items || []).map(it => ({ id: it.id || uid(), productId: it.productId, qty: it.qty, unitPrice: it.unitPrice, presentation: it.presentation || null, factor: it.factor || 1 })),
       discount: doc.discountType === "pct" ? (doc.discount && subtotalOf(doc) ? Math.round(doc.discount / subtotalOf(doc) * 100) : doc.discount) : doc.discount,
       discountType: doc.discountType || "pct", tax: doc.tax || "", notes: doc.notes || "", paymentTerms: doc.paymentTerms || "",
     });
@@ -237,7 +242,7 @@ export function Pedidos({ D, A, user }) {
     if (!valid.length) { setErr("Agrega al menos un producto con cantidad."); return; }
     const cust = form.customerId === "__guest__" ? GUEST : customers.find(c => c.id === form.customerId);
     if (!cust) { setErr("Selecciona un cliente válido."); return; }
-    const items = valid.map(it => { const p = products.find(x => x.id === it.productId); const sub = n(it.qty) * n(it.unitPrice); return { id: it.id, productId: it.productId, name: p?.name || "", unit: p?.unit || "", qty: n(it.qty), unitPrice: n(it.unitPrice), sub, subtotal: sub }; });
+    const items = valid.map(it => { const p = products.find(x => x.id === it.productId); const sub = n(it.qty) * n(it.unitPrice); return { id: it.id, productId: it.productId, name: p?.name || "", unit: it.presentation || p?.unit || "", qty: n(it.qty), unitPrice: n(it.unitPrice), sub, subtotal: sub, presentation: it.presentation || null, factor: it.factor || 1 }; });
     const isEdit = Boolean(editing);
     const numero = isEdit ? editing.numero : nextNumero(form.tipo);
     const doc = {
@@ -288,7 +293,7 @@ export function Pedidos({ D, A, user }) {
     setErr("");
     const venta = await ejecutar(() => A.registrarVenta({
       customerId: doc.customerId, customerName: doc.customerName, pedidoId: doc.id,
-      items: (doc.items || []).map(it => ({ productId: it.productId, name: it.name, unit: it.unit, qty: n(it.qty), unitPrice: n(it.unitPrice) })),
+      items: (doc.items || []).map(it => ({ productId: it.productId, name: it.name, unit: it.unit, qty: n(it.qty), unitPrice: n(it.unitPrice), factor: it.factor || 1, presentation: it.presentation || null })),
       discount: n(doc.discount), discountType: "amount",
       payments: [], notes: doc.notes || `Pedido ${doc.codigo}`,
     }));
@@ -497,10 +502,10 @@ export function Pedidos({ D, A, user }) {
                     {p?.img ? <img src={p.img} alt="" style={{ width: "100%", height: "100%", objectFit: "cover" }} /> : <BrandLogo size={18} />}
                   </div>
                   <div style={{ flex: 1, minWidth: 0 }}>
-                    <div style={{ fontSize: 12.5, fontWeight: 600, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{p?.name || "Producto"}</div>
+                    <div style={{ fontSize: 12.5, fontWeight: 600, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{p?.name || "Producto"}{it.presentation && <span style={{ color: C.brand }}> · {it.presentation}</span>}</div>
                     <div style={{ fontSize: 11, color: C.textFaint }}>{Bs(n(it.qty) * n(it.unitPrice))}</div>
                   </div>
-                  <input type="number" min="0" value={it.qty} onChange={e => updateItem(it.id, "qty", e.target.value)} title="Cantidad" style={{ ...inp, width: 58, padding: "5px 6px" }} />
+                  <input type="number" min="0" step="any" inputMode="decimal" value={it.qty} onChange={e => updateItem(it.id, "qty", e.target.value)} title="Cantidad" style={{ ...inp, width: 58, padding: "5px 6px" }} />
                   <input type="number" min="0" step="0.01" value={it.unitPrice} onChange={e => updateItem(it.id, "unitPrice", e.target.value)} title="Precio unitario" style={{ ...inp, width: 84, padding: "5px 6px" }} />
                   <button onClick={() => removeItem(it.id)} style={{ background: "none", border: "none", cursor: "pointer", color: C.red, display: "flex", padding: 4 }}><Trash2 size={15} /></button>
                 </div>
@@ -557,7 +562,8 @@ export function Pedidos({ D, A, user }) {
       </Modal>}
 
       {printDoc && <DocumentoModal doc={printDoc} config={config} onClose={() => setPrintDoc(null)} />}
-      {eligiendoVariante && <SelectorVariante grupo={eligiendoVariante} variantes={D.variantesDe?.get(eligiendoVariante.id) || []} onClose={() => setEligiendoVariante(null)} onElegir={v => { addProductToCart(v.id); setEligiendoVariante(null); }} />}
+      {eligiendoVariante && <SelectorVariante grupo={eligiendoVariante} variantes={D.variantesDe?.get(eligiendoVariante.id) || []} onClose={() => setEligiendoVariante(null)} onElegir={v => { setEligiendoVariante(null); agregarProducto(v); }} />}
+      {eligiendoCantidad && <SelectorCantidad producto={eligiendoCantidad} presentaciones={D.presentacionesDe?.get(eligiendoCantidad.id) || []} onClose={() => setEligiendoCantidad(null)} onElegir={o => { addProductToCart(eligiendoCantidad.id, o); setEligiendoCantidad(null); }} />}
     </div>
   );
 }

@@ -24,9 +24,9 @@ import { precioSugerido, cantidadPorMonto, leerEtiquetaBalanza, leerBalanza, coi
 import { imprimirTicket, leerAnchoTicket, guardarAnchoTicket, leerAutoTicket, guardarAutoTicket } from "../utils/ticketTermico.js";
 import { Chip } from "./ui/Chip.jsx";
 
-const PM_LABELS = { efectivo: "💵 Efectivo", transferencia: "🏦 Transf.", banco: "🏦 Transf.", qr: "📱 QR", tarjeta: "💳 Tarjeta", mixto: "🔀 Mixto", credito: "🧾 Crédito" };
-const PM_COLORS = { efectivo: "green", transferencia: "blue", banco: "blue", qr: "amber", tarjeta: "blue", mixto: "default", credito: "amber" };
-const PM_TEXTO = { efectivo: "Efectivo", transferencia: "Transferencia bancaria", banco: "Transferencia bancaria", qr: "Pago QR", tarjeta: "Tarjeta", mixto: "Pago mixto", credito: "Crédito" };
+const PM_LABELS = { efectivo: "💵 Efectivo", transferencia: "🏦 Transf.", banco: "🏦 Transf.", qr: "📱 QR", tarjeta: "💳 Tarjeta", mixto: "🔀 Mixto", credito: "🧾 Crédito", anticipo: "🔖 Anticipo" };
+const PM_COLORS = { efectivo: "green", transferencia: "blue", banco: "blue", qr: "amber", tarjeta: "blue", mixto: "default", credito: "amber", anticipo: "blue" };
+const PM_TEXTO = { efectivo: "Efectivo", transferencia: "Transferencia bancaria", banco: "Transferencia bancaria", qr: "Pago QR", tarjeta: "Tarjeta", mixto: "Pago mixto", credito: "Crédito", anticipo: "Anticipo" };
 // Número visible de la nota de venta (correlativo por empresa)
 const numeroNota = sale => `N° ${String(sale?.numero || 0).padStart(6, "0")}`;
 

@@ -4,7 +4,7 @@
 import { DEFAULT_CATEGORY_ID } from "../categories.js";
 
 const num = v => (v == null || v === "" ? 0 : Number(v) || 0);
-const METODO_A_APP = { EFECTIVO: "efectivo", QR: "qr", TRANSFERENCIA: "banco", TARJETA: "tarjeta", MIXTO: "mixto", CREDITO: "credito" };
+const METODO_A_APP = { EFECTIVO: "efectivo", QR: "qr", TRANSFERENCIA: "banco", TARJETA: "tarjeta", MIXTO: "mixto", CREDITO: "credito", ANTICIPO: "anticipo" };
 export const metodoApp = m => METODO_A_APP[m] || "efectivo";
 
 // ── Productos ──────────────────────────────────────────────────────────────
@@ -53,6 +53,18 @@ export const fromProduct = p => ({
 // ── Presentaciones (Caja x12, Paquete x6…) ─────────────────────────────────
 export const PRESENTACION_COLS = "id,producto_id,nombre,factor,precio,codigo,activo,orden";
 export const toPresentacion = r => ({ id: r.id, productId: r.producto_id, name: r.nombre, factor: num(r.factor), price: num(r.precio), barcode: r.codigo || "", order: r.orden || 0 });
+
+// ── Órdenes de servicio ─────────────────────────────────────────────────────
+export const toOrdenServicio = r => ({
+  id: r.id, numero: Number(r.numero) || 0, estado: r.estado,
+  customerId: r.cliente_id || null, customerName: r.cliente_nombre || "", phone: r.cliente_telefono || "",
+  equipo: r.equipo || "", marca: r.marca || "", modelo: r.modelo || "", serie: r.serie || "", accesorios: r.accesorios || "",
+  falla: r.falla || "", diagnostico: r.diagnostico || "", presupuesto: num(r.presupuesto), anticipo: num(r.anticipo), anticipoMetodo: r.anticipo_metodo || "",
+  items: (r.items || []).map(i => ({ productId: i.producto_id || null, name: i.nombre, qty: num(i.cantidad), price: num(i.precio) })),
+  total: (r.items || []).reduce((a, i) => a + num(i.cantidad) * num(i.precio), 0),
+  tecnico: r.tecnico || "", recibido: r.fecha_recepcion, prometido: r.fecha_prometida || null, entregado: r.fecha_entrega || null,
+  garantiaDias: r.garantia_dias ?? null, notas: r.notas || "", ventaId: r.venta_id || null, usuario: r.usuario_nombre || "",
+});
 
 export const LOTE_COLS = "id,producto_id,codigo,vencimiento,cantidad,cantidad_inicial,costo_unitario,created_at";
 export const toLote = r => ({ id: r.id, productId: r.producto_id, code: r.codigo, expires: r.vencimiento || null, qty: num(r.cantidad), initialQty: num(r.cantidad_inicial), cost: num(r.costo_unitario), createdAt: r.created_at });

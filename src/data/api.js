@@ -3,7 +3,7 @@
 // mensaje en español listo para mostrar al usuario.
 import { supabase } from "../lib/supabaseClient";
 import {
-  PRODUCTO_COLS, LOTE_COLS, toLote, PRESENTACION_COLS, toPresentacion, CLIENTE_COLS, VENTA_SELECT, GASTO_COLS, MOV_COLS, COMPRA_SELECT, EMPRESA_COLS,
+  PRODUCTO_COLS, LOTE_COLS, toLote, toOrdenServicio, PRESENTACION_COLS, toPresentacion, CLIENTE_COLS, VENTA_SELECT, GASTO_COLS, MOV_COLS, COMPRA_SELECT, EMPRESA_COLS,
   toProduct, toCategory, toCustomer, toSale, toExpense, toMovement, toSupplier, toPurchase,
   toFormula, toOrder, toConfig, toUser, toActivity,
   fromProduct, fromCustomer, fromExpense, fromSupplier, fromFormula, fromConfig,
@@ -61,6 +61,8 @@ export async function cargarTodo(empresaId) {
     activityLogs: supabase.from("activity_logs").select("id,usuario_id,usuario_nombre,accion,detalle,created_at").order("created_at", { ascending: false }).limit(200),
     caja:       supabase.rpc("caja_resumen"),
     presentaciones: todasLasFilas(t => supabase.from("producto_presentaciones").select(PRESENTACION_COLS, t ? { count: "exact" } : undefined).eq("activo", true).order("orden").order("id")),
+    // Órdenes abiertas + las cerradas del último año
+    servicios:  supabase.from("ordenes_servicio").select("*").or(`estado.not.in.(ENTREGADO,CANCELADO),created_at.gte."${desdeMeses(12)}"`).order("created_at", { ascending: false }).limit(1000),
     lotes:      todasLasFilas(t => supabase.from("lotes").select(LOTE_COLS, t ? { count: "exact" } : undefined).gt("cantidad", 0).order("vencimiento", { ascending: true, nullsFirst: false }).order("id")),
   };
   const mapeo = {
@@ -68,7 +70,7 @@ export async function cargarTodo(empresaId) {
     customers: rs => rs.map(toCustomer), sales: rs => rs.map(toSale), expenses: rs => rs.map(toExpense),
     movements: rs => rs.map(toMovement), pedidos: rs => rs, suppliers: rs => rs.map(toSupplier),
     purchases: rs => rs.map(toPurchase), formulas: rs => rs.map(toFormula), orders: rs => rs.map(toOrder),
-    users: rs => rs.map(toUser), activityLogs: rs => rs.map(toActivity), caja: r => r || null, lotes: rs => rs.map(toLote), presentaciones: rs => rs.map(toPresentacion),
+    users: rs => rs.map(toUser), activityLogs: rs => rs.map(toActivity), caja: r => r || null, lotes: rs => rs.map(toLote), servicios: rs => rs.map(toOrdenServicio), presentaciones: rs => rs.map(toPresentacion),
   };
   const keys = Object.keys(q);
   const results = await Promise.allSettled(keys.map(k => q[k]));
@@ -158,6 +160,34 @@ export const presentaciones = {
     return toPresentacion(ok(await q.select(PRESENTACION_COLS).single()));
   },
   async eliminar(id) { ok(await supabase.from("producto_presentaciones").update({ activo: false }).eq("id", id)); },
+};
+
+// Órdenes de servicio: todas las escrituras pasan por funciones del servidor
+const itemsOrden = items => (items || []).map(i => ({ producto_id: i.productId || null, nombre: i.name, cantidad: Number(i.qty), precio: Number(i.price) }));
+export const servicios = {
+  async obtener(id) { return toOrdenServicio(ok(await supabase.from("ordenes_servicio").select("*").eq("id", id).single())); },
+  async eventos(id) { return ok(await supabase.from("ordenes_servicio_eventos").select("estado,nota,usuario_nombre,created_at").eq("orden_id", id).order("created_at")); },
+  async crear(o) {
+    return toOrdenServicio(await rpc("servicio_crear", { p: {
+      cliente_id: o.customerId || null, cliente_nombre: o.customerName, cliente_telefono: o.phone, equipo: o.equipo, marca: o.marca, modelo: o.modelo,
+      serie: o.serie, accesorios: o.accesorios, falla: o.falla, presupuesto: Number(o.presupuesto) || 0, anticipo: Number(o.anticipo) || 0,
+      anticipo_metodo: o.anticipoMetodo, tecnico: o.tecnico, fecha_prometida: o.prometido || null, garantia_dias: o.garantiaDias === "" ? null : o.garantiaDias,
+      notas: o.notas, items: itemsOrden(o.items),
+    } }));
+  },
+  async actualizar(id, o) {
+    const p = {};
+    ["equipo", "marca", "modelo", "serie", "accesorios", "falla", "diagnostico", "tecnico", "notas"].forEach(k => { if (k in o) p[k] = o[k]; });
+    if ("phone" in o) p.cliente_telefono = o.phone;
+    if ("presupuesto" in o) p.presupuesto = Number(o.presupuesto) || 0;
+    if ("prometido" in o) p.fecha_prometida = o.prometido || null;
+    if ("garantiaDias" in o) p.garantia_dias = o.garantiaDias === "" ? null : o.garantiaDias;
+    if ("items" in o) p.items = itemsOrden(o.items);
+    return toOrdenServicio(await rpc("servicio_actualizar", { p_id: id, p }));
+  },
+  async estado(id, estado, nota) { return toOrdenServicio(await rpc("servicio_estado", { p_id: id, p_estado: estado, p_nota: nota || null })); },
+  async entregar(id, pagos) { const r = await rpc("servicio_entregar", { p_id: id, p_pagos: (pagos || []).map(x => ({ monto: Number(x.amount), metodo: x.method })) }); return { orden: toOrdenServicio(r), venta: r.venta || null }; },
+  async cancelar(id, motivo, devolver) { return toOrdenServicio(await rpc("servicio_cancelar", { p_id: id, p_motivo: motivo, p_devolver_anticipo: !!devolver })); },
 };
 
 export const lotes = {

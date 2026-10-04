@@ -10,8 +10,8 @@ export const guardarAnchoTicket = a => { try { localStorage.setItem(CLAVE_ANCHO,
 export const leerAutoTicket = () => { try { return localStorage.getItem(CLAVE_AUTO) === "1"; } catch { return false; } };
 export const guardarAutoTicket = v => { try { localStorage.setItem(CLAVE_AUTO, v ? "1" : "0"); } catch { /* sin almacenamiento */ } };
 
-const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
-const dinero = (v, simbolo) => `${simbolo} ${Number(v || 0).toLocaleString("es-BO", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+export const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+export const dinero = (v, simbolo) => `${simbolo} ${Number(v || 0).toLocaleString("es-BO", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 const METODO = { efectivo: "Efectivo", qr: "QR", transferencia: "Transferencia", banco: "Transferencia", tarjeta: "Tarjeta", mixto: "Mixto", credito: "Crédito" };
 
 /** HTML del ticket (se exporta para poder probarlo). */
@@ -67,8 +67,10 @@ export function htmlTicket({ sale, config = {}, ancho = 80, simbolo = "Bs.", ven
 }
 
 /** Imprime el ticket con un marco oculto (no lo bloquean las ventanas emergentes). */
-export function imprimirTicket(opciones) {
-  const html = htmlTicket(opciones);
+export function imprimirTicket(opciones) { imprimirHtml(htmlTicket(opciones)); }
+
+/** Imprime cualquier HTML de ticket con un marco oculto. */
+export function imprimirHtml(html) {
   const marco = document.createElement("iframe");
   marco.setAttribute("aria-hidden", "true");
   Object.assign(marco.style, { position: "fixed", right: "0", bottom: "0", width: "0", height: "0", border: "0", visibility: "hidden" });

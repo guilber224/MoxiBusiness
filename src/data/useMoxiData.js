@@ -17,7 +17,7 @@ const CACHE_VERSION = "v2";
 const cacheKey = eid => `moxi_${CACHE_VERSION}_${eid}`;
 export const VACIO = {
   config: { businessName: "", currency: "BOB", logo_url: null, qr_url: null }, products: [], categories: [], customers: [], sales: [], expenses: [], movements: [],
-  pedidos: [], suppliers: [], purchases: [], formulas: [], orders: [], users: [], activityLogs: [], caja: null, lotes: [], presentaciones: [],
+  pedidos: [], suppliers: [], purchases: [], formulas: [], orders: [], users: [], activityLogs: [], caja: null, lotes: [], presentaciones: [], servicios: [],
 };
 const leerCache = eid => { try { const v = JSON.parse(localStorage.getItem(cacheKey(eid))); return v && typeof v === "object" ? { ...VACIO, ...v } : null; } catch { return null; } };
 const escribirCache = (eid, data) => { try { localStorage.setItem(cacheKey(eid), JSON.stringify(data)); } catch { /* cuota llena: la app sigue funcionando sin caché */ } };
@@ -151,6 +151,9 @@ export function useMoxiData(user) {
         if (p.eventType === "DELETE" || p.new?.activo === false) mutar("presentaciones", ps => sinId(ps, p.old?.id || p.new?.id));
         else if (p.new?.id) mutar("presentaciones", ps => porId(ps, toPresentacion(p.new)));
       })
+      .on("postgres_changes", { event: "*", schema: "public", table: "ordenes_servicio", filter: f }, p => {
+        if (p.new?.id) api.servicios.obtener(p.new.id).then(o => mutar("servicios", os => porId(os, o))).catch(() => {});
+      })
       .on("postgres_changes", { event: "*", schema: "public", table: "lotes", filter: f }, () => { clearTimeout(pendientes.get("lotes")); pendientes.set("lotes", setTimeout(refrescarLotes, 600)); })
       .subscribe();
     return () => { pendientes.forEach(clearTimeout); supabase.removeChannel(ch); };
@@ -266,6 +269,19 @@ export function useMoxiData(user) {
       reiniciarDatos: async (modulos, confirmacion) => { const r = await api.empresa.reiniciar(modulos, confirmacion); await cargar(); return r; },
       guardarPresentacion: async p => { const r = await api.presentaciones.guardar(p, E()); mutar("presentaciones", ps => porId(ps, r)); return r; },
       eliminarPresentacion: async id => { await api.presentaciones.eliminar(id); mutar("presentaciones", ps => sinId(ps, id)); },
+      // Órdenes de servicio
+      crearServicio: async o => { const r = await api.servicios.crear(o); mutar("servicios", os => porId(os, r)); refrescarCaja(); return r; },
+      actualizarServicio: async (id, o) => { const r = await api.servicios.actualizar(id, o); mutar("servicios", os => porId(os, r)); return r; },
+      estadoServicio: async (id, estado, nota) => { const r = await api.servicios.estado(id, estado, nota); mutar("servicios", os => porId(os, r)); return r; },
+      entregarServicio: async (id, pagos) => {
+        const r = await api.servicios.entregar(id, pagos);
+        mutar("servicios", os => porId(os, r.orden));
+        if (r.venta?.id) { const v = await api.ventas.obtener(r.venta.id); if (v?.id) mutar("sales", ss => porId(ss, v)); }
+        refrescarProductos((r.orden.items || []).map(i => i.productId)); refrescarCaja(); refrescarKardex();
+        return r;
+      },
+      cancelarServicio: async (id, motivo, devolver) => { const r = await api.servicios.cancelar(id, motivo, devolver); mutar("servicios", os => porId(os, r)); refrescarCaja(); return r; },
+      eventosServicio: id => api.servicios.eventos(id),
       importarProductos: async (filas, actualizar) => { const r = await api.importar.productos(filas, actualizar); await cargar(); return r; },
       importarClientes: async (filas, actualizar) => { const r = await api.importar.clientes(filas, actualizar); await cargar(); return r; },
       completarOnboarding: async (completado = true) => { await api.empresa.onboarding(completado); setData(d => ({ ...d, config: { ...d.config, onboardingCompletado: completado } })); },
