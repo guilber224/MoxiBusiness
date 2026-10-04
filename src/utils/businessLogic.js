@@ -18,7 +18,7 @@ export const today = () => { const d = new Date(); return `${d.getFullYear()}-${
 // "2026-10-03" se interpreta como fecha local; new Date("2026-10-03") la toma como UTC y la muestra el día anterior.
 export const parseFecha = d => {
   if (d instanceof Date) return d;
-  if (typeof d === "string" && /^d{4}-d{2}-d{2}$/.test(d)) { const [y, m, dd] = d.split("-").map(Number); return new Date(y, m - 1, dd, 12); }
+  if (typeof d === "string" && /^\d{4}-\d{2}-\d{2}$/.test(d)) { const [y, m, dd] = d.split("-").map(Number); return new Date(y, m - 1, dd, 12); }
   return new Date(d);
 };
 const valida = d => d != null && d !== "" && !Number.isNaN(parseFecha(d).getTime());

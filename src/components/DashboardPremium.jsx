@@ -234,7 +234,7 @@ export function DashboardPremium({ D, setTab, user, refreshTrigger = 0 }) {
                     <CreditCard size={16} color={C.danger} strokeWidth={2} />
                   </div>
                   <div style={{ flex: 1 }}>
-                    <div style={{ fontSize: 13, fontWeight: 600, color: "var(--color-text)" }}>{debtClients.length} facturas pendientes de cobro</div>
+                    <div style={{ fontSize: 13, fontWeight: 600, color: "var(--color-text)" }}>{debtClients.length} {debtClients.length === 1 ? "venta pendiente" : "ventas pendientes"} de cobro</div>
                     <div style={{ fontSize: 12, color: "var(--color-text-faint)" }}>Total pendiente: {Bs(totalDeuda)}</div>
                   </div>
                   <ChevronRight size={16} color="var(--color-text-faint)" />

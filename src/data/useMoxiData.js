@@ -109,6 +109,15 @@ export function useMoxiData(user) {
   useEffect(() => {
     if (!eid) return;
     const f = `empresa_id=eq.${eid}`;
+    // Una venta dispara varios eventos (insert + recálculo por cada pago): se agrupan en una sola lectura.
+    const pendientes = new Map();
+    const releerVenta = id => {
+      clearTimeout(pendientes.get(id));
+      pendientes.set(id, setTimeout(async () => {
+        pendientes.delete(id);
+        try { const v = await api.ventas.obtener(id); if (v?.id) mutar("sales", ss => porId(ss, v)); } catch { /* sin red */ }
+      }, 400));
+    };
     const ch = supabase.channel(`moxi_v2_${eid}`)
       .on("postgres_changes", { event: "*", schema: "public", table: "productos", filter: f }, p => {
         if (p.eventType === "DELETE" || p.new?.activo === false) mutar("products", ps => sinId(ps, p.old?.id || p.new?.id));
@@ -123,9 +132,9 @@ export function useMoxiData(user) {
         else if (p.new?.id) mutar("expenses", es => porId(es, toExpense(p.new)));
         refrescarCaja();
       })
-      .on("postgres_changes", { event: "*", schema: "public", table: "ventas", filter: f }, async p => {
+      .on("postgres_changes", { event: "*", schema: "public", table: "ventas", filter: f }, p => {
         if (p.eventType === "DELETE") { mutar("sales", ss => sinId(ss, p.old?.id)); return; }
-        try { const v = await api.ventas.obtener(p.new.id); if (v?.id) mutar("sales", ss => porId(ss, v)); } catch { /* sin red */ }
+        if (p.new?.id) releerVenta(p.new.id);
       })
       .on("postgres_changes", { event: "*", schema: "public", table: "pedidos", filter: f }, p => {
         if (p.eventType === "DELETE") mutar("pedidos", ps => sinId(ps, p.old?.id));
@@ -133,7 +142,7 @@ export function useMoxiData(user) {
       })
       .on("postgres_changes", { event: "*", schema: "public", table: "caja_turnos", filter: f }, () => refrescarCaja())
       .subscribe();
-    return () => { supabase.removeChannel(ch); };
+    return () => { pendientes.forEach(clearTimeout); supabase.removeChannel(ch); };
   }, [eid, mutar, refrescarCaja]);
 
   // ── Acciones ───────────────────────────────────────────────────────────────
