@@ -3,7 +3,7 @@
 // mensaje en español listo para mostrar al usuario.
 import { supabase } from "../lib/supabaseClient";
 import {
-  PRODUCTO_COLS, LOTE_COLS, toLote, toOrdenServicio, toCita, toMesa, toComanda, COMANDA_SELECT, PRESENTACION_COLS, toPresentacion, CLIENTE_COLS, VENTA_SELECT, GASTO_COLS, MOV_COLS, COMPRA_SELECT, EMPRESA_COLS,
+  PRODUCTO_COLS, LOTE_COLS, toLote, toOrdenServicio, toCita, toMesa, toComanda, COMANDA_SELECT, toMembresiaPlan, toMembresia, toAsistencia, PRESENTACION_COLS, toPresentacion, CLIENTE_COLS, VENTA_SELECT, GASTO_COLS, MOV_COLS, COMPRA_SELECT, EMPRESA_COLS,
   toProduct, toCategory, toCustomer, toSale, toExpense, toMovement, toSupplier, toPurchase,
   toFormula, toOrder, toConfig, toUser, toActivity,
   fromProduct, fromCustomer, fromExpense, fromSupplier, fromFormula, fromConfig,
@@ -66,6 +66,10 @@ export async function cargarTodo(empresaId) {
     servicios:  supabase.from("ordenes_servicio").select("*").or(`estado.not.in.(ENTREGADO,CANCELADO),created_at.gte."${desdeMeses(12)}"`).order("created_at", { ascending: false }).limit(1000),
     // Citas de los últimos 2 meses y todas las futuras (las más antiguas se piden al navegar)
     citas:      todasLasFilas(t => supabase.from("citas").select("*", t ? { count: "exact" } : undefined).gte("inicio", desdeMeses(2)).order("inicio").order("id")),
+    membresiaPlanes: supabase.from("membresia_planes").select("*").eq("activo", true).order("orden").limit(200),
+    // Membresías vigentes, futuras, congeladas y las vencidas de los últimos 3 meses (para renovar)
+    membresias: todasLasFilas(t => supabase.from("membresias").select("*", t ? { count: "exact" } : undefined).or(`fin.gte.${desdeMeses(3).slice(0, 10)},estado.eq.CONGELADA`).order("fin", { ascending: false }).order("id")),
+    asistencias: supabase.from("membresia_asistencias").select("*").gte("fecha", inicioDeHoy()).order("fecha", { ascending: false }).limit(1000),
     mesas:      supabase.from("mesas").select("*").eq("activo", true).order("orden").order("nombre").limit(500),
     // Comandas abiertas y las de hoy (las cerradas antiguas ya están en Ventas)
     comandas:   supabase.from("comandas").select(COMANDA_SELECT).or(`estado.eq.ABIERTA,abierta_at.gte."${inicioDeHoy()}"`).order("abierta_at", { ascending: false }).limit(500),
@@ -76,7 +80,7 @@ export async function cargarTodo(empresaId) {
     customers: rs => rs.map(toCustomer), sales: rs => rs.map(toSale), expenses: rs => rs.map(toExpense),
     movements: rs => rs.map(toMovement), pedidos: rs => rs, suppliers: rs => rs.map(toSupplier),
     purchases: rs => rs.map(toPurchase), formulas: rs => rs.map(toFormula), orders: rs => rs.map(toOrder),
-    users: rs => rs.map(toUser), activityLogs: rs => rs.map(toActivity), caja: r => r || null, lotes: rs => rs.map(toLote), servicios: rs => rs.map(toOrdenServicio), citas: rs => rs.map(toCita), mesas: rs => rs.map(toMesa), comandas: rs => rs.map(toComanda), presentaciones: rs => rs.map(toPresentacion),
+    users: rs => rs.map(toUser), activityLogs: rs => rs.map(toActivity), caja: r => r || null, lotes: rs => rs.map(toLote), servicios: rs => rs.map(toOrdenServicio), citas: rs => rs.map(toCita), mesas: rs => rs.map(toMesa), membresiaPlanes: rs => rs.map(toMembresiaPlan), membresias: rs => rs.map(toMembresia), asistencias: rs => rs.map(toAsistencia), comandas: rs => rs.map(toComanda), presentaciones: rs => rs.map(toPresentacion),
   };
   const keys = Object.keys(q);
   const results = await Promise.allSettled(keys.map(k => q[k]));
@@ -194,6 +198,27 @@ export const servicios = {
   async estado(id, estado, nota) { return toOrdenServicio(await rpc("servicio_estado", { p_id: id, p_estado: estado, p_nota: nota || null })); },
   async entregar(id, pagos) { const r = await rpc("servicio_entregar", { p_id: id, p_pagos: (pagos || []).map(x => ({ monto: Number(x.amount), metodo: x.method })) }); return { orden: toOrdenServicio(r), venta: r.venta || null }; },
   async cancelar(id, motivo, devolver) { return toOrdenServicio(await rpc("servicio_cancelar", { p_id: id, p_motivo: motivo, p_devolver_anticipo: !!devolver })); },
+};
+
+// Membresías: todas las escrituras pasan por funciones del servidor
+export const membresias = {
+  async guardarPlan(p) {
+    return toMembresiaPlan(await rpc("membresia_plan_guardar", { p: { id: p.id || null, nombre: p.name, precio: Number(p.price), duracion_valor: Number(p.duracionValor),
+      duracion_unidad: p.duracionUnidad, sesiones: p.sesiones ? Number(p.sesiones) : null, ingresos_por_dia: Number(p.ingresosPorDia) || 1, descripcion: p.descripcion } }));
+  },
+  async eliminarPlan(id) { await rpc("membresia_plan_eliminar", { p_id: id }); },
+  async vender(v) {
+    const r = await rpc("membresia_vender", { p: { cliente_id: v.customerId, plan_id: v.planId, inicio: v.inicio || null, precio: v.precio === "" || v.precio == null ? null : Number(v.precio),
+      descuento: Number(v.descuento) || 0, notas: v.notas, pagos: (v.pagos || []).filter(x => Number(x.amount) > 0).map(x => ({ monto: Number(x.amount), metodo: x.method })) } });
+    return { membresia: toMembresia(r), venta: r.venta || null };
+  },
+  async asistencia(id, forzar = false) { const r = await rpc("membresia_asistencia", { p_id: id, p_forzar: forzar }); return { membresia: toMembresia(r), diasRestantes: r.dias_restantes }; },
+  async congelar(id) { return toMembresia(await rpc("membresia_congelar", { p_id: id })); },
+  async reactivar(id) { const r = await rpc("membresia_reactivar", { p_id: id }); return { membresia: toMembresia(r), dias: r.dias_extendidos || 0 }; },
+  async cancelar(id, motivo) { return toMembresia(await rpc("membresia_cancelar", { p_id: id, p_motivo: motivo || null })); },
+  async ajustar(id, p) { return toMembresia(await rpc("membresia_ajustar", { p_id: id, p })); },
+  async delCliente(clienteId) { return ok(await supabase.from("membresias").select("*").eq("cliente_id", clienteId).order("inicio", { ascending: false }).limit(200)).map(toMembresia); },
+  async asistenciasDe(membresiaId) { return ok(await supabase.from("membresia_asistencias").select("*").eq("membresia_id", membresiaId).order("fecha", { ascending: false }).limit(200)).map(toAsistencia); },
 };
 
 // Mesas y comandas: todas las escrituras pasan por funciones del servidor

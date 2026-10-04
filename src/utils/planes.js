@@ -2,7 +2,7 @@
 // Secciones que se pueden incluir o no en un plan (Panel y Ajustes van siempre)
 export const MODULOS_PLAN = [
   ["clientes", "Clientes"], ["ventas", "Ventas"], ["deudas", "Deudas"], ["productos", "Productos"],
-  ["inventario", "Inventario"], ["caja", "Flujo de caja"], ["gastos", "Gastos"], ["pedidos", "Pedidos y cotizaciones"], ["servicios", "Órdenes de servicio"], ["agenda", "Agenda y citas"], ["mesas", "Mesas y comandas"],
+  ["inventario", "Inventario"], ["caja", "Flujo de caja"], ["gastos", "Gastos"], ["pedidos", "Pedidos y cotizaciones"], ["servicios", "Órdenes de servicio"], ["agenda", "Agenda y citas"], ["mesas", "Mesas y comandas"], ["membresias", "Membresías"],
   ["proveedores", "Proveedores y compras"], ["produccion", "Producción"], ["analisis", "Análisis"],
   ["exportar", "Exportar a Excel"], ["actividad", "Registro de actividad"],
 ];

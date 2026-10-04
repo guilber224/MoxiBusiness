@@ -9,7 +9,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { supabase } from "../lib/supabaseClient";
 import * as api from "./api.js";
-import { PRODUCTO_COLS, toProduct, toCustomer, toExpense, toSale, toPresentacion, toCita, toMesa } from "./mappers.js";
+import { PRODUCTO_COLS, toProduct, toCustomer, toExpense, toSale, toPresentacion, toCita, toMesa, toMembresiaPlan, toMembresia, toAsistencia } from "./mappers.js";
 import { recordLocalChange, reconcileWithServer, resetLocalChanges } from "../utils/localChanges.js";
 import { DEFAULT_CATEGORY_ID } from "../categories.js";
 
@@ -17,7 +17,7 @@ const CACHE_VERSION = "v2";
 const cacheKey = eid => `moxi_${CACHE_VERSION}_${eid}`;
 export const VACIO = {
   config: { businessName: "", currency: "BOB", logo_url: null, qr_url: null }, products: [], categories: [], customers: [], sales: [], expenses: [], movements: [],
-  pedidos: [], suppliers: [], purchases: [], formulas: [], orders: [], users: [], activityLogs: [], caja: null, lotes: [], presentaciones: [], servicios: [], citas: [], mesas: [], comandas: [],
+  pedidos: [], suppliers: [], purchases: [], formulas: [], orders: [], users: [], activityLogs: [], caja: null, lotes: [], presentaciones: [], servicios: [], citas: [], mesas: [], comandas: [], membresiaPlanes: [], membresias: [], asistencias: [],
 };
 const leerCache = eid => { try { const v = JSON.parse(localStorage.getItem(cacheKey(eid))); return v && typeof v === "object" ? { ...VACIO, ...v } : null; } catch { return null; } };
 const escribirCache = (eid, data) => { try { localStorage.setItem(cacheKey(eid), JSON.stringify(data)); } catch { /* cuota llena: la app sigue funcionando sin caché */ } };
@@ -164,6 +164,17 @@ export function useMoxiData(user) {
       .on("postgres_changes", { event: "*", schema: "public", table: "ordenes_servicio", filter: f }, p => {
         if (p.new?.id) api.servicios.obtener(p.new.id).then(o => mutar("servicios", os => porId(os, o))).catch(() => {});
       })
+      .on("postgres_changes", { event: "*", schema: "public", table: "membresia_planes", filter: f }, p => {
+        if (p.eventType === "DELETE" || p.new?.activo === false) mutar("membresiaPlanes", ps => sinId(ps, p.old?.id || p.new?.id));
+        else if (p.new?.id) mutar("membresiaPlanes", ps => porId(ps, toMembresiaPlan(p.new)).sort((a, b) => a.orden - b.orden));
+      })
+      .on("postgres_changes", { event: "*", schema: "public", table: "membresias", filter: f }, p => {
+        if (p.eventType === "DELETE") mutar("membresias", ms => sinId(ms, p.old?.id));
+        else if (p.new?.id) mutar("membresias", ms => porId(ms, toMembresia(p.new)));
+      })
+      .on("postgres_changes", { event: "INSERT", schema: "public", table: "membresia_asistencias", filter: f }, p => {
+        if (p.new?.id) mutar("asistencias", as => porId(as, toAsistencia(p.new)));
+      })
       .on("postgres_changes", { event: "*", schema: "public", table: "mesas", filter: f }, p => {
         if (p.eventType === "DELETE" || p.new?.activo === false) mutar("mesas", ms => sinId(ms, p.old?.id || p.new?.id));
         else if (p.new?.id) mutar("mesas", ms => porId(ms, toMesa(p.new)));
@@ -309,6 +320,29 @@ export function useMoxiData(user) {
       },
       cancelarServicio: async (id, motivo, devolver) => { const r = await api.servicios.cancelar(id, motivo, devolver); mutar("servicios", os => porId(os, r)); refrescarCaja(); return r; },
       eventosServicio: id => api.servicios.eventos(id),
+      // Membresías
+      guardarPlanMembresia: async p => { const r = await api.membresias.guardarPlan(p); mutar("membresiaPlanes", ps => porId(ps, r).sort((a, b) => a.orden - b.orden)); return r; },
+      eliminarPlanMembresia: async id => { await api.membresias.eliminarPlan(id); mutar("membresiaPlanes", ps => sinId(ps, id)); },
+      venderMembresia: async v => {
+        const r = await api.membresias.vender(v);
+        mutar("membresias", ms => porId(ms, r.membresia));
+        let sale = null;
+        if (r.venta?.id) { sale = await api.ventas.obtener(r.venta.id); if (sale?.id) mutar("sales", ss => porId(ss, sale)); refrescarCaja(); }
+        return { ...r, sale };
+      },
+      registrarAsistencia: async (id, forzar) => { const r = await api.membresias.asistencia(id, forzar); mutar("membresias", ms => porId(ms, r.membresia)); return r; },
+      congelarMembresia: async id => { const r = await api.membresias.congelar(id); mutar("membresias", ms => porId(ms, r)); return r; },
+      reactivarMembresia: async id => {
+        const r = await api.membresias.reactivar(id);
+        // Las renovaciones posteriores también se corrieron: se releen las del cliente
+        const delCliente = await api.membresias.delCliente(r.membresia.customerId);
+        mutar("membresias", ms => delCliente.reduce((acc, m) => porId(acc, m), ms));
+        return r;
+      },
+      cancelarMembresia: async (id, motivo) => { const r = await api.membresias.cancelar(id, motivo); mutar("membresias", ms => porId(ms, r)); return r; },
+      ajustarMembresia: async (id, p) => { const r = await api.membresias.ajustar(id, p); mutar("membresias", ms => porId(ms, r)); return r; },
+      membresiasDelCliente: id => api.membresias.delCliente(id),
+      asistenciasDeMembresia: id => api.membresias.asistenciasDe(id),
       // Mesas y comandas
       guardarMesa: async m => { const r = await api.mesas.guardar(m); mutar("mesas", ms => porId(ms, r).sort((a, b) => a.orden - b.orden)); return r; },
       eliminarMesa: async id => { await api.mesas.eliminar(id); mutar("mesas", ms => sinId(ms, id)); },

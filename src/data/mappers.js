@@ -66,6 +66,19 @@ export const toOrdenServicio = r => ({
   garantiaDias: r.garantia_dias ?? null, notas: r.notas || "", ventaId: r.venta_id || null, usuario: r.usuario_nombre || "",
 });
 
+// ── Membresías ─────────────────────────────────────────────────────────────
+export const toMembresiaPlan = r => ({
+  id: r.id, name: r.nombre, price: num(r.precio), duracionValor: r.duracion_valor, duracionUnidad: r.duracion_unidad,
+  sesiones: r.sesiones ?? null, ingresosPorDia: r.ingresos_por_dia || 1, descripcion: r.descripcion || "", orden: r.orden || 0,
+});
+export const toMembresia = r => ({
+  id: r.id, customerId: r.cliente_id, customerName: r.cliente_nombre || "", planId: r.plan_id || null, planNombre: r.plan_nombre || "",
+  inicio: r.inicio, fin: r.fin, sesionesTotal: r.sesiones_total ?? null, sesionesUsadas: r.sesiones_usadas || 0,
+  precio: num(r.precio), estado: r.estado, congeladaDesde: r.congelada_desde || null, diasCongelados: r.dias_congelados || 0,
+  motivo: r.motivo_cancelacion || "", notas: r.notas || "", ventaId: r.venta_id || null, usuario: r.usuario_nombre || "", createdAt: r.created_at,
+});
+export const toAsistencia = r => ({ id: r.id, membresiaId: r.membresia_id, customerId: r.cliente_id, customerName: r.cliente_nombre || "", planNombre: r.plan_nombre || "", fecha: r.fecha, usuario: r.usuario_nombre || "" });
+
 // ── Mesas y comandas ───────────────────────────────────────────────────────
 export const toMesa = r => ({ id: r.id, name: r.nombre, zona: r.zona || "", capacidad: r.capacidad ?? null, orden: r.orden || 0 });
 export const toComandaItem = r => ({

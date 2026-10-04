@@ -19,6 +19,7 @@ import { PlanBloqueado } from "./components/PlanBloqueado.jsx";
 import { useAvisosCuenta } from "./hooks/useAvisosCuenta.js";
 import { diasParaVencer } from "./utils/lotes.js";
 import { CITA_ABIERTA, fechaLocal, sumarDias } from "./utils/agenda.js";
+import { cubiertoHasta } from "./utils/membresias.js";
 import { today } from "./utils/businessLogic.js";
 import { useMoxiData } from "./data/useMoxiData.js";
 import { EstadoDatos } from "./components/ui/EstadoDatos.jsx";
@@ -43,6 +44,7 @@ const Productos = lazyWithReload(() => import("./components/Productos.jsx").then
 const Inventario = lazyWithReload(() => import("./components/Inventario.jsx").then(m => ({ default: m.Inventario })));
 const Ventas = lazyWithReload(() => import("./components/Ventas.jsx").then(m => ({ default: m.Ventas })));
 const Pedidos = lazyWithReload(() => import("./components/Pedidos.jsx").then(m => ({ default: m.Pedidos })));
+const Membresias = lazyWithReload(() => import("./components/Membresias.jsx").then(m => ({ default: m.Membresias })));
 const Mesas = lazyWithReload(() => import("./components/Mesas.jsx").then(m => ({ default: m.Mesas })));
 const Agenda = lazyWithReload(() => import("./components/Agenda.jsx").then(m => ({ default: m.Agenda })));
 const Servicios = lazyWithReload(() => import("./components/Servicios.jsx").then(m => ({ default: m.Servicios })));
@@ -181,6 +183,15 @@ export default function App() {
     const n = (data.citas || []).filter(c => CITA_ABIERTA(c.estado) && !c.recordada && fechaLocal(c.inicio) === manana).length;
     return n ? [{ id: `citas-${manana}-${n}`, tipo: "warn", titulo: `${n} cita${n === 1 ? "" : "s"} mañana sin recordatorio`, texto: "Envía el recordatorio por WhatsApp desde la Agenda", tab: "agenda" }] : [];
   }, [data.citas]);
+  // Membresías que vencen en 3 días o menos y el cliente aún no renovó
+  const avisosMembresias = useMemo(() => {
+    const hoy = today(), limite = sumarDias(hoy, 3);
+    const porCliente = new Map();
+    (data.membresias || []).forEach(m => { if (m.estado !== "CANCELADA") porCliente.set(m.customerId, [...(porCliente.get(m.customerId) || []), m]); });
+    let n = 0;
+    porCliente.forEach(lista => { const hasta = cubiertoHasta(lista, hoy); if (hasta && hasta <= limite) n++; });
+    return n ? [{ id: `membresias-${hoy}-${n}`, tipo: "warn", titulo: `${n} membresía${n === 1 ? "" : "s"} por vencer`, texto: "Vencen en 3 días o menos y aún no renovaron", tab: "membresias" }] : [];
+  }, [data.membresias]);
   const appLowStock = useMemo(() => data.products.filter(p => !p.isGroup && p.minStock > 0 && p.stock <= p.minStock), [data.products]);
 
   const loadingScreen = (
@@ -225,7 +236,7 @@ export default function App() {
           />
         )}
         <div style={{ display: "flex", flexDirection: "column", flex: 1, minWidth: 0, overflow: "hidden" }}>
-          <Topbar isMobile={isMobile} sidebarOpen={sidebarOpen} setSidebarOpen={setSidebarOpen} sidebarCollapsed={sidebarCollapsed} setSidebarCollapsed={setSidebarCollapsed} setTab={setTab} user={user} data={data} appDebtClients={appDebtClients} appLowStock={appLowStock} avisos={[...avisosCuenta, ...avisosLotes, ...avisosAgenda]} onDescartarAviso={descartarAviso} />
+          <Topbar isMobile={isMobile} sidebarOpen={sidebarOpen} setSidebarOpen={setSidebarOpen} sidebarCollapsed={sidebarCollapsed} setSidebarCollapsed={setSidebarCollapsed} setTab={setTab} user={user} data={data} appDebtClients={appDebtClients} appLowStock={appLowStock} avisos={[...avisosCuenta, ...avisosLotes, ...avisosAgenda, ...avisosMembresias]} onDescartarAviso={descartarAviso} />
 
           {user.role !== "superadmin" && suscripcion && !suscripcionService.estaVencida(suscripcion) && dias <= 7 && (
             <div style={{ background: "#92400e", borderBottom: "1px solid #b45309", padding: "8px 18px", display: "flex", alignItems: "center", gap: 10, fontSize: 13, color: "#fef3c7", flexShrink: 0, flexWrap: "wrap" }}>
@@ -251,6 +262,7 @@ export default function App() {
                 {seccion("servicios", <Servicios {...props} />)}
                 {seccion("agenda", <Agenda {...props} />)}
                 {seccion("mesas", <Mesas {...props} />)}
+                {seccion("membresias", <Membresias {...props} />)}
                 {seccion("deudas", <Deudas {...props} />)}
                 {seccion("productos", <Productos {...props} />)}
                 {seccion("inventario", <Inventario {...props} />)}
