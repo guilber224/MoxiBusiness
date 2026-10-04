@@ -574,7 +574,7 @@ export function Ventas({ D, A, user, estado }) {
           <Table cols={[{ key: "name", label: "Producto" }, { key: "qty", label: "Cant.", render: (v, row) => `${v} ${row.unit}` }, { key: "unitPrice", label: "Precio unit.", render: v => Bs(v) }, { key: "sub", label: "Subtotal", render: v => <strong>{Bs(v)}</strong> }]} rows={sale.items} />
           {(() => {
             const profit = calcSaleProfit(sale);
-            const margin = sale.total > 0 && hasCostData ? Math.round(profit / sale.total * 100) : null;
+            const margin = sale.total > 0 && hasCostData && !sale.anulada ? Math.round(profit / sale.total * 100) : null;
             const cols = margin !== null ? [["Total", Bs(sale.total), C.red], ["Pagado", Bs(sale.paid), C.green], ["Deuda", Bs(sale.debt), sale.debt > 0 ? C.amber : C.green], ["Ganancia", Bs(profit) + (margin !== null ? ` (${margin}%)` : ""), C.green]] : [["Total", Bs(sale.total), C.red], ["Pagado", Bs(sale.paid), C.green], ["Deuda", Bs(sale.debt), sale.debt > 0 ? C.amber : C.green]];
             return (
               <div style={{ display: "grid", gridTemplateColumns: `repeat(${cols.length},1fr)`, gap: 8, padding: "12px", background: C.bg, borderRadius: R.md, marginTop: 12, marginBottom: 12 }}>

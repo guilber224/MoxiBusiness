@@ -42,10 +42,14 @@ export function Proveedores({ D, A, user }) {
     }), { exito: pForm.productId && pForm.addStock ? "Compra registrada y stock actualizado" : "Compra registrada" });
     if (ok) { setModal(null); setPForm(PFORM_VACIO()); }
   };
-  const pagarCompra = async p => {
-    const monto = window.prompt(`Monto a pagar al proveedor (deuda: ${Bs(p.debt)})`, p.debt.toFixed(2));
-    if (monto == null || !(n(monto) > 0)) return;
-    await ejecutar(() => A.pagarCompra(p.id, Math.min(p.total, p.paid + n(monto))), { exito: "Pago registrado" });
+  const [pago, setPago] = useState(null); // { compra, monto }
+  const pagarCompra = async () => {
+    const monto = n(pago?.monto);
+    if (!(monto > 0)) { setErr("Ingresa un monto mayor a 0"); return; }
+    setErr("");
+    const p = pago.compra;
+    const ok = await ejecutar(() => A.pagarCompra(p.id, Math.min(p.total, p.paid + monto)), { exito: "Pago al proveedor registrado" });
+    if (ok) setPago(null);
   };
 
   const getSpTotal = id => purchases.filter(p => p.supplierId === id).reduce((a, p) => a + p.total, 0);
@@ -104,7 +108,7 @@ export function Proveedores({ D, A, user }) {
 
       {purchases.length > 0 && <div style={{ ...card(), marginTop: 14 }}>
         <div style={{ fontWeight: 700, fontSize: 13, marginBottom: 10 }}>Historial de compras</div>
-        <Table cols={[{ key: "supplierName", label: "Proveedor" }, { key: "product", label: "Producto" }, { key: "qty", label: "Cant." }, { key: "total", label: "Total", render: v => <strong>{Bs(v)}</strong> }, { key: "paid", label: "Pagado", render: v => <span style={{ color: C.green }}>{Bs(v)}</span> }, { key: "debt", label: "Deuda", render: (v, row) => v > 0 ? <button onClick={() => pagarCompra(row)} style={{ ...mkBadge("red"), border: "none", cursor: "pointer" }}>{Bs(v)} · Pagar</button> : <span style={mkBadge("green")}>Saldado</span> }, { key: "date", label: "Fecha", render: v => fDate(v) }]} rows={purchases.slice(0, 50)} />
+        <Table cols={[{ key: "supplierName", label: "Proveedor" }, { key: "product", label: "Producto" }, { key: "qty", label: "Cant." }, { key: "total", label: "Total", render: v => <strong>{Bs(v)}</strong> }, { key: "paid", label: "Pagado", render: v => <span style={{ color: C.green }}>{Bs(v)}</span> }, { key: "debt", label: "Deuda", render: (v, row) => v > 0 ? <button onClick={() => { setErr(""); setPago({ compra: row, monto: row.debt.toFixed(2) }); }} style={{ ...mkBadge("red"), border: "none", cursor: "pointer" }}>{Bs(v)} · Pagar</button> : <span style={mkBadge("green")}>Saldado</span> }, { key: "date", label: "Fecha", render: v => fDate(v) }]} rows={purchases.slice(0, 50)} />
       </div>}
 
       {(modal === "new" || (modal && typeof modal === "object" && suppliers.some(x => x.id === modal.id))) && <Modal title={typeof modal === "string" ? "Nuevo proveedor" : "Editar proveedor"} onClose={() => setModal(null)}>
@@ -147,6 +151,19 @@ export function Proveedores({ D, A, user }) {
           Sumar al stock y actualizar el costo promedio del producto
         </label>}
         <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}><button onClick={() => setModal(null)} style={mkBtn("ghost")}>Cancelar</button>{err && <span style={{ color: C.red, fontSize: 13, alignSelf: "center" }}>{err}</span>}<button onClick={savePurchase} disabled={guardando} style={mkBtn("primary")}>{guardando ? "Guardando…" : "Registrar compra"}</button></div>
+      </Modal>}
+      {pago && <Modal title="Pagar al proveedor" onClose={() => setPago(null)}>
+        <div style={{ fontSize: 13, color: C.textMid, marginBottom: 12 }}>
+          {pago.compra.supplierName || "Proveedor"} · {pago.compra.product} · Deuda actual: <strong style={{ color: C.red }}>{Bs(pago.compra.debt)}</strong>
+        </div>
+        <label style={lbl}>Monto a pagar (Bs.)</label>
+        <input type="number" min="0" step="any" inputMode="decimal" style={inp} value={pago.monto} onChange={e => setPago({ ...pago, monto: e.target.value })} autoFocus />
+        {n(pago.monto) > pago.compra.debt && <div style={{ fontSize: 12, color: C.amber, marginTop: 6 }}>Se registrará solo la deuda pendiente ({Bs(pago.compra.debt)}).</div>}
+        <div style={{ display: "flex", gap: 8, justifyContent: "flex-end", marginTop: 16 }}>
+          {err && <span style={{ color: C.red, fontSize: 13, alignSelf: "center" }}>{err}</span>}
+          <button onClick={() => setPago(null)} style={mkBtn("ghost")}>Cancelar</button>
+          <button onClick={pagarCompra} disabled={guardando} style={mkBtn("primary")}>{guardando ? "Guardando…" : "Registrar pago"}</button>
+        </div>
       </Modal>}
     </div>
   );

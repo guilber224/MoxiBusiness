@@ -104,7 +104,7 @@ export function Inventario({ D, A }) {
             { key: "date", label: "Fecha", render: v => fDateTime(v) },
             { key: "type", label: "Tipo", render: v => { const m = MOV[v] || [v, C.text]; return <span style={{ ...mkBadge("default"), color: m[1], background: m[1] + "18" }}>{m[0]}</span>; } },
             { key: "productName", label: "Producto", render: (v, r) => v || products.find(p => p.id === r.productId)?.name || "—" },
-            { key: "qty", label: "Cantidad", render: (v, r) => { const m = MOV[r.type]; return <span style={{ fontWeight: 600, color: m?.[1] || C.text }}>{m?.[2] === "±" ? "" : m?.[2]}{v}</span>; } },
+            { key: "qty", label: "Cantidad", render: (v, r) => { const m = MOV[r.type]; const d = r.stockBefore != null && r.stockAfter != null ? r.stockAfter - r.stockBefore : null; const signo = d != null ? (d < 0 ? "−" : "+") : (m?.[2] === "±" ? "" : m?.[2]); const color = d != null ? (d < 0 ? C.red : C.green) : (m?.[1] || C.text); return <span style={{ fontWeight: 600, color }}>{signo}{Math.abs(n(v))}</span>; } },
             { key: "stockAfter", label: "Stock", render: (v, r) => (v == null ? "—" : `${r.stockBefore ?? "?"} → ${v}`) },
             { key: "cost", label: "Costo unit.", render: v => (v > 0 ? Bs(v) : "—") },
             { key: "user", label: "Usuario", render: v => v || "—" },

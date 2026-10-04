@@ -42,7 +42,9 @@ export function Produccion({ D, A, user }) {
   const previewBatches = n(oForm.batches) || 1;
   const previewOutput = previewFormula ? (previewFormula.outputQty * previewBatches) : 0;
   const previewInput = previewFormula ? (previewFormula.inputQty * previewBatches) : 0;
-  const previewCost = previewFormula ? ((previewFormula.laborCost + previewFormula.energyCost) * previewBatches + n(oForm.extraCost)) : 0;
+  const previewIn = previewFormula ? products.find(p => p.id === previewFormula.inputId) : null;
+  // Igual que en el servidor: insumo a costo promedio + mano de obra + energía + extras
+  const previewCost = previewFormula ? (previewInput * n(previewIn?.cost) + (previewFormula.laborCost + previewFormula.energyCost) * previewBatches + n(oForm.extraCost)) : 0;
   const previewProd = previewFormula ? products.find(p => p.id === previewFormula.outputId) : null;
   const previewRevenue = previewOutput * (previewProd?.price || 0);
   const previewMargin = previewRevenue > 0 ? Math.round((previewRevenue - previewCost) / previewRevenue * 100) : 0;
@@ -104,8 +106,8 @@ export function Produccion({ D, A, user }) {
                 { key: "formulaName", label: "Fórmula", style: { fontWeight: 500 } },
                 { key: "date", label: "Fecha", render: v => fDate(v) },
                 { key: "batches", label: "Lotes" },
-                { key: "inputUsed", label: "Mat. Prima", render: (v) => <span style={{ color: C.red }}>{v} unid.</span> },
-                { key: "outputProduced", label: "Producido", render: (v) => <span style={{ color: C.green, fontWeight: 600 }}>{v} unid.</span> },
+                { key: "inputUsed", label: "Mat. Prima", render: (v, r) => <span style={{ color: C.red }}>{v} {products.find(p => p.id === r.inputId)?.unit || "unid."}</span> },
+                { key: "outputProduced", label: "Producido", render: (v, r) => <span style={{ color: C.green, fontWeight: 600 }}>{v} {products.find(p => p.id === r.outputId)?.unit || "unid."}</span> },
                 { key: "totalCost", label: "Costo", render: v => Bs(v) },
                 { key: "costPerUnit", label: "Costo/Unid.", render: v => Bs(v) },
                 { key: "margin", label: "Margen", render: v => <span style={mkBadge(v >= 30 ? "green" : v >= 10 ? "amber" : "red")}>{v}%</span> },
@@ -131,7 +133,7 @@ export function Produccion({ D, A, user }) {
           <div style={{ ...lbl, color: C.red, marginBottom: 8 }}>📥 Materia prima (entrada)</div>
           <div style={row()}>
             <div style={{ flex: 2 }}><label style={lbl}>Producto *</label>
-              <select style={inp} value={fForm.inputId} onChange={e => setFForm({ ...fForm, inputId: e.target.value })}>
+              <select style={inp} value={fForm.inputId} onChange={e => setFForm({ ...fForm, inputId: e.target.value, inputUnit: products.find(p => p.id === e.target.value)?.unit || fForm.inputUnit })}>
                 <option value="">Seleccionar...</option>
                 {products.map(p => <option key={p.id} value={p.id}>{p.name} (Stock: {getStock(p.id)} {p.unit})</option>)}
               </select>
@@ -144,7 +146,7 @@ export function Produccion({ D, A, user }) {
           <div style={{ ...lbl, color: C.green, marginBottom: 8 }}>📤 Producto terminado (salida)</div>
           <div style={row()}>
             <div style={{ flex: 2 }}><label style={lbl}>Producto *</label>
-              <select style={inp} value={fForm.outputId} onChange={e => setFForm({ ...fForm, outputId: e.target.value })}>
+              <select style={inp} value={fForm.outputId} onChange={e => setFForm({ ...fForm, outputId: e.target.value, outputUnit: products.find(p => p.id === e.target.value)?.unit || fForm.outputUnit })}>
                 <option value="">Seleccionar...</option>
                 {products.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
               </select>
@@ -170,11 +172,11 @@ export function Produccion({ D, A, user }) {
             <div style={{ marginBottom: 10 }}><label style={lbl}>Fórmula *</label>
               <select style={inp} value={oForm.formulaId} onChange={e => setOForm({ ...oForm, formulaId: e.target.value })}>
                 <option value="">Seleccionar fórmula...</option>
-                {formulas.map(f => { const inP = products.find(p => p.id === f.inputId); const outP = products.find(p => p.id === f.outputId); return <option key={f.id} value={f.id}>{f.name} ({f.inputQty}{f.inputUnit} → {f.outputQty} {outP?.unit || "u"} de {outP?.name})</option>; })}
+                {formulas.map(f => { const inP = products.find(p => p.id === f.inputId); const outP = products.find(p => p.id === f.outputId); return <option key={f.id} value={f.id}>{f.name} ({f.inputQty} {f.inputUnit || inP?.unit || ""} → {f.outputQty} {outP?.unit || "u"} de {outP?.name})</option>; })}
               </select>
             </div>
             {previewFormula && <div style={{ background: C.bg, borderRadius: R.md, padding: "12px", marginBottom: 10, display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 8 }}>
-              <div><div style={lbl}>Materia prima a usar</div><div style={{ fontWeight: 700, color: C.red }}>{previewInput.toFixed(1)} unid.</div><div style={{ fontSize: 11, color: C.textFaint }}>Stock: {getStock(previewFormula.inputId)}</div></div>
+              <div><div style={lbl}>Materia prima a usar</div><div style={{ fontWeight: 700, color: C.red }}>{previewInput.toFixed(1)} {previewIn?.unit || previewFormula.inputUnit || "unid."}</div><div style={{ fontSize: 11, color: C.textFaint }}>Stock: {getStock(previewFormula.inputId)}</div></div>
               <div><div style={lbl}>Producción estimada</div><div style={{ fontWeight: 700, color: C.green }}>{previewOutput.toFixed(1)} {previewProd?.unit || "unid."}</div></div>
               <div><div style={lbl}>Margen estimado</div><div style={{ fontWeight: 700, color: previewMargin >= 30 ? C.green : previewMargin >= 10 ? C.amber : C.red }}>{previewMargin}%</div></div>
             </div>}

@@ -16,7 +16,7 @@ import { Modal } from "./ui/Modal.jsx";
 import { Table } from "./ui/Table.jsx";
 
 export const CATEGORIAS_CAJA = {
-  ingreso: ["Cobro de deuda", "Venta directa", "Aporte de capital", "Otro ingreso"],
+  ingreso: ["Aporte de capital", "Cambio / sencillo", "Devolución de proveedor", "Otro ingreso"],
   gasto: ["Compras / mercadería", "Transporte", "Sueldos", "Alquiler", "Energía", "Servicios", "Mantenimiento", "Marketing", "Impuestos", "Otro gasto"],
 };
 const METODO_TXT = { QR: "QR", TRANSFERENCIA: "Transferencia", TARJETA: "Tarjeta", MIXTO: "Mixto", CREDITO: "Crédito" };
